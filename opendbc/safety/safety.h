@@ -1,34 +1,34 @@
 #pragma once
 
-#include "opendbc/safety/helpers.h"
-#include "opendbc/safety/lateral.h"
-#include "opendbc/safety/longitudinal.h"
-#include "opendbc/safety/safety_declarations.h"
-#include "opendbc/safety/board/can.h"
+#include "helpers.h"
+#include "lateral.h"
+#include "longitudinal.h"
+#include "safety_declarations.h"
+#include "board/can.h"
 
 // all the safety modes
-#include "opendbc/safety/modes/defaults.h"
-#include "opendbc/safety/modes/honda.h"
-#include "opendbc/safety/modes/toyota.h"
-#include "opendbc/safety/modes/tesla.h"
-#include "opendbc/safety/modes/gm.h"
-#include "opendbc/safety/modes/ford.h"
-#include "opendbc/safety/modes/hyundai.h"
-#include "opendbc/safety/modes/chrysler.h"
-#include "opendbc/safety/modes/rivian.h"
-#include "opendbc/safety/modes/subaru.h"
-#include "opendbc/safety/modes/subaru_preglobal.h"
-#include "opendbc/safety/modes/mazda.h"
-#include "opendbc/safety/modes/nissan.h"
-#include "opendbc/safety/modes/volkswagen_mqb.h"
-#include "opendbc/safety/modes/volkswagen_pq.h"
-#include "opendbc/safety/modes/elm327.h"
-#include "opendbc/safety/modes/body.h"
-#include "opendbc/safety/modes/bmw.h"
+#include "modes/defaults.h"
+#include "modes/honda.h"
+#include "modes/toyota.h"
+#include "modes/tesla.h"
+#include "modes/gm.h"
+#include "modes/ford.h"
+#include "modes/hyundai.h"
+#include "modes/chrysler.h"
+#include "modes/rivian.h"
+#include "modes/subaru.h"
+#include "modes/subaru_preglobal.h"
+#include "modes/mazda.h"
+#include "modes/nissan.h"
+#include "modes/volkswagen_mqb.h"
+#include "modes/volkswagen_pq.h"
+#include "modes/elm327.h"
+#include "modes/body.h"
+#include "modes/bmw.h"
 
 // CAN-FD only safety modes
 #ifdef CANFD
-#include "opendbc/safety/modes/hyundai_canfd.h"
+#include "modes/hyundai_canfd.h"
 #endif
 
 uint32_t GET_BYTES(const CANPacket_t *msg, int start, int len) {

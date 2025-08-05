@@ -1,6 +1,6 @@
 #pragma once
 
-#include "opendbc/safety/safety_declarations.h"
+#include "../safety_declarations.h"
 static float interpolate(struct lookup_t xy, float x);
 
 
