@@ -1,6 +1,6 @@
 #pragma once
 
-#include "opendbc/safety/safety_declarations.h"
+#include "../safety_declarations.h"
 
 static bool nissan_alt_eps = false;
 

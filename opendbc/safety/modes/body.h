@@ -1,6 +1,6 @@
 #pragma once
 
-#include "opendbc/safety/safety_declarations.h"
+#include "../safety_declarations.h"
 
 static void body_rx_hook(const CANPacket_t *msg) {
   if (msg->addr == 0x201U) {
