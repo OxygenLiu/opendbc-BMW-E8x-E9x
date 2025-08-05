@@ -1,0 +1,281 @@
+#pragma once
+
+#include "opendbc/safety/safety_declarations.h"
+static float interpolate(struct lookup_t xy, float x);
+
+
+// CAN msgs we care about
+#define BMW_EngineAndBrake 0xA8
+#define BMW_AccPedal 0xAA
+#define BMW_Speed 0x1A0
+#define BMW_SteeringWheelAngle_slow 0xC8
+#define BMW_CruiseControlStatus 0x200
+#define BMW_DynamicCruiseControlStatus 0x193
+#define BMW_CruiseControlStalk 0x194
+#define BMW_TransmissionDataDisplay 0x1D2
+
+#define BMW_PT_CAN 0
+#define BMW_F_CAN 1
+#define BMW_AUX_CAN 2
+
+
+RxCheck bmw_rx_checks[] = {  // todo add .check_checksum
+  {.msg = {{BMW_EngineAndBrake,       BMW_PT_CAN, 8, .max_counter = 15U, .frequency = 100U, .ignore_checksum = true}, { 0 }, { 0 }}},
+  {.msg = {{BMW_AccPedal,             BMW_PT_CAN, 8, .max_counter = 15U, .frequency = 100U, .ignore_checksum = true}, { 0 }, { 0 }}},
+  {.msg = {{BMW_Speed,                BMW_PT_CAN, 8, .max_counter = 14U, .frequency = 50U, .ignore_checksum = true}, { 0 }, { 0 }}},
+  // {.msg = {{BMW_SteeringWheelAngle_slow,   BMW_PT_CAN, 6, .ignore_counter = true, .frequency = 5U, .ignore_checksum = true}, { 0 }, { 0 }}}, // todo if uesed, maybe add to bmw_get_counter
+  {.msg = {{BMW_TransmissionDataDisplay,    BMW_PT_CAN, 6, .max_counter = 14U, .frequency = 5U, .ignore_checksum = true}, { 0 }, { 0 }}},
+  {.msg = {{BMW_DynamicCruiseControlStatus, BMW_PT_CAN, 8, .max_counter = 15U, .frequency = 5U, .ignore_checksum = true},
+           {BMW_CruiseControlStatus,  BMW_PT_CAN, 8, .ignore_counter = true, .frequency = 5U, .ignore_checksum = true},
+           { 0 }}},
+  // {.msg = {{BMW_SteeringWheelAngle_slow,   BMW_PT_CAN, 6, .max_counter = 0U, .frequency = 5U, .ignore_checksum = true}, { 0 }, { 0 }}},
+  // todo cruise control type dependant, use param:
+  {.msg = {{0x22f,  BMW_F_CAN, 8, .max_counter = 15U, .frequency = 100U, .ignore_checksum = true},
+           {0x22f,  BMW_AUX_CAN, 8, .max_counter = 15U, .frequency = 100U, .ignore_checksum = true},
+           { 0 }}},
+};
+
+
+static uint8_t bmw_get_counter(const CANPacket_t *to_push) {
+  uint8_t cnt = 0;
+  if (to_push->addr == BMW_DynamicCruiseControlStatus) {
+    cnt = (to_push->data[0] >> 4) & 0xFU;
+  } else if (to_push->addr == BMW_TransmissionDataDisplay) {
+    cnt = (to_push->data[3] >> 4) & 0xFU;
+  } else if (to_push->addr == BMW_Speed) {
+    cnt = (to_push->data[6] >> 4) & 0xFU;
+  } else {
+    cnt = to_push->data[1] & 0xFU;
+  }
+  return cnt;
+}
+
+const CanMsg BMW_TX_MSGS[] = {
+  {BMW_CruiseControlStalk, BMW_PT_CAN, 4, .check_relay = false},   // Normal cruise control send status on PT-CAN
+  {BMW_CruiseControlStalk, BMW_F_CAN, 4, .check_relay = false},    // Dynamic cruise control send status on F-CAN
+  {0x22e, BMW_F_CAN, 5, .check_relay = false},    // STEPPER_SERVO_CAN is allowed on F-CAN network
+  {0x22e, BMW_AUX_CAN, 5, .check_relay = false},  // or an standalone network
+};
+
+
+#define CAN_BMW_SPEED_FAC 0.1
+#define CAN_BMW_ANGLE_FAC 0.04395
+#define CAN_BMW_ACC_FAC 0.025
+#define CAN_ACTUATOR_POS_FAC 0.125
+#define CAN_ACTUATOR_TQ_FAC 0.125
+
+bool bmw_fmax_limit_check(float val, const float MAX_VAL, const float MIN_VAL) {
+  return (val > MAX_VAL) || (val < MIN_VAL);
+}
+
+// rounding error margin
+float BMW_MARGIN = 0.1;
+
+// #define BMW_LAT_ACC_MAX 3.0 // EU guideline
+
+// // steering angle based on EU 3m/s2 lat acc limit for 2.76m wheelbase and 16.0 steer ratio
+const struct lookup_t BMW_LOOKUP_MAX_ANGLE = {
+    {5., 15., 25.},     // m/s
+    {303.6, 33.7, 12.1}};  // deg
+
+
+const struct lookup_t BMW_ANGLE_RATE_WINDUP = { // deg/s windup rate limit
+    {0., 5., 25.},      // m/s
+    {500., 80., 40.}};  // deg/s
+
+const struct lookup_t BMW_ANGLE_RATE_UNWIND = { // deg/s unwind rate limit
+    {0., 5., 25.},      // m/s
+    {500., 350., 50.}}; // deg/s
+
+const struct lookup_t BMW_MAX_TQ_RATE = {
+    {0., 5., 15.},      // m/s
+    {16., 8., 1.}};   // Nm/10ms
+
+// state of angle limits
+float bmw_rt_angle_last = 0.; // last actual angle
+
+float angle_rate_up = 0;
+float angle_rate_down = 0;
+float bmw_max_angle = 0;
+float max_tq_rate = 0;
+
+int lever_position = -1; //0 is when no ignition, so -1 unset
+float bmw_speed = 0;
+float actuator_torque = 0;
+
+
+static void bmw_rx_hook(const CANPacket_t *to_push) {
+
+  bool cruise_engaged = false;
+  if ((to_push->addr == BMW_DynamicCruiseControlStatus) || (to_push->addr == BMW_CruiseControlStatus)) { //handles both vehicle options VO544 and Vo540
+    if (to_push->addr == BMW_DynamicCruiseControlStatus) { //dynamic cruise control
+      cruise_engaged = (((to_push->data[5] >> 3) & 0x1U) == 1U);
+    } else if (to_push->addr == BMW_CruiseControlStatus) { //normal cruise control option
+      cruise_engaged = (((to_push->data[1] >> 5) & 0x1U) == 1U);
+    } else {
+      cruise_engaged = false;
+    }
+    pcm_cruise_check(cruise_engaged);
+  }
+
+  if (to_push->addr == BMW_CruiseControlStalk){ //disable on cruise stalk cancel
+    if ((to_push->data[2] & 0x90) != 0x0){
+      controls_allowed = false;
+    }
+  }
+  if (to_push->addr == BMW_TransmissionDataDisplay) {
+    lever_position = to_push->data[0] & 0xF;
+    if (lever_position != ((to_push->data[0] >> 4) ^ 0xF)) { //check against shift lever compliment signal
+      lever_position = -1; //invalid
+    }
+    // if not in Drive
+    if (lever_position != 8 ){
+      controls_allowed = false;
+    }
+  }
+
+  //get vehicle speed
+  if (to_push->addr == BMW_Speed) {
+    bmw_speed = to_signed(((to_push->data[1] & 0xF) << 8) + to_push->data[0], 12) * CAN_BMW_SPEED_FAC * KPH_TO_MS; //raw to km/h to m/s
+    angle_rate_up = interpolate(BMW_ANGLE_RATE_WINDUP, bmw_speed) + BMW_MARGIN;   // deg/1s
+    angle_rate_down = interpolate(BMW_ANGLE_RATE_UNWIND, bmw_speed) + BMW_MARGIN; // deg/1s
+    bmw_max_angle = interpolate(BMW_LOOKUP_MAX_ANGLE, bmw_speed) + BMW_MARGIN;
+    max_tq_rate = interpolate(BMW_MAX_TQ_RATE, bmw_speed) + BMW_MARGIN;
+
+    // check moving forward and reverse
+    vehicle_moving = (to_push->data[1] & 0x30U) != 0U;
+
+    // // check lateral acceleration limits
+    // float bmw_lat_acc = to_signed((to_push->data[4] << 4) | (to_push->data[3] >> 4), 12) * CAN_BMW_ACC_FAC;
+    // if (ABS(bmw_lat_acc) > BMW_LAT_ACC_MAX) {
+    //   print("Too big lateral acc \n");
+    //   controls_allowed = false; //todo add soft-off request when violation occurs to loss of torque in the turn
+    // }
+  }
+
+  // STEPPER_SERVO_CAN: get STEERING_STATUS
+  if ((to_push->addr == 0x22f) && ((to_push->bus == BMW_F_CAN) || (to_push->bus == BMW_AUX_CAN))) {
+    int8_t torque_meas_new = ((int8_t)(to_push->data[2])); // torque raw
+    actuator_torque = (float)torque_meas_new * CAN_ACTUATOR_TQ_FAC;
+    update_sample(&torque_meas, torque_meas_new);
+
+    if(((to_push->data[1]>>4) & 0x4) != 0){ // SOFT_OFF ramp complete lockout status
+      controls_allowed = false;
+      // print("BMW SoftOff lockout\n");
+    }
+  }
+
+  //get latest steering wheel angle rate
+  if (to_push->addr == BMW_SteeringWheelAngle_slow) {
+    float meas_angle = to_signed((to_push->data[1] << 8) | to_push->data[0], 16) * CAN_BMW_ANGLE_FAC; // deg
+    // float angle_rate = to_signed((to_push->data[4] << 8) | to_push->data[3], 16) * CAN_BMW_ANGLE_FAC; // deg/s
+    // // todo use common steer_angle_cmd_checks()
+    // if(bmw_fmax_limit_check(meas_angle, bmw_max_angle, -bmw_max_angle)){
+    //   // We should not be able to STEER under these conditions
+    //   controls_allowed = false;
+    //   if (cruise_engaged){
+    //     print("Too big angle \n");
+    //   }
+    // }
+    // if (meas_angle * bmw_rt_angle_last > 0.) { // ignore when zero crossing
+    //   if (bmw_fmax_limit_check((meas_angle >= 0.) ? angle_rate : -angle_rate, angle_rate_up, -angle_rate_down)) { //should be sensitive for jerks to the outside
+    //     controls_allowed = false;
+    //     if (cruise_engaged){
+    //       print("To fast angle rate \n");
+    //     }
+    //   }
+    // }
+
+    bmw_rt_angle_last = meas_angle;
+  }
+
+  // exit controls on brake press
+  if (to_push->addr == BMW_EngineAndBrake) {
+    brake_pressed = (to_push->data[7] & 0x20U) != 0U;
+  }
+
+  if (to_push->addr == BMW_AccPedal) {
+    gas_pressed = (to_push->data[6] & 0x30U) != 0U;
+  }
+
+  // generic_rx_checks();
+}
+
+static bool bmw_tx_hook(const CANPacket_t *to_send) {
+  const TorqueSteeringLimits STEPPER_SERVO_LIMITS = {
+    .max_torque = (12.f / CAN_ACTUATOR_TQ_FAC),     // < 12Nm
+    .max_rate_up = 2,                               // <= 0.125Nm/10ms
+    .max_rate_down = (1.0f / CAN_ACTUATOR_TQ_FAC),  // < 1Nm/10ms
+    .max_rt_delta = (25.0f / CAN_ACTUATOR_TQ_FAC),  // 25Nm/250ms
+    .max_torque_error = (1.0f / CAN_ACTUATOR_TQ_FAC),  // 1Nm
+    .type = TorqueMotorLimited,
+  };
+
+  UNUSED(to_send);
+
+  bool tx = true;
+  static float bmw_desired_angle_last = 0; // last desired steer angle
+  // STEPPER_SERVO_CAN: get STEERING_COMMAND
+  // do not transmit CAN message if steering angle too high
+  if (to_send->addr == 0x22e) {
+    // Torque Control Mode:
+    uint8_t steer_mode = (to_send->data[1] >> 4) & 0b11u;
+    if (steer_mode != 0x0){
+      int8_t steer_torque = (int8_t)(to_send->data[4]); // Nm / CAN_ACTUATOR_TQ_FAC
+      // int8_t steer_torque_last = desired_torque_last;
+      if (steer_torque_cmd_checks(steer_torque, -1, STEPPER_SERVO_LIMITS)) {
+        // print("Violation torque\n");
+        // puth(steer_torque);print(", ");puth(steer_torque_last);print(", "); puth(torque_meas.max);print(", "); puth(STEPPER_SERVO_LIMITS.max_rate_down);print("\n");
+        tx = false;
+      }
+    }
+    // Position Control Mode:
+    float desired_angle = 0;
+    if (steer_mode == 0x2){
+      float angle_delta_req = ((float)(int16_t)((to_send->data[2]) | (to_send->data[3] << 8))) * CAN_ACTUATOR_POS_FAC; //deg/10ms
+      desired_angle = bmw_rt_angle_last + angle_delta_req; //measured + requested delta
+
+      if (controls_allowed == true) { // todo: use steer_angle_cmd_checks()
+        bool violation = false;
+        //check for max angles
+        violation |= bmw_fmax_limit_check(desired_angle, bmw_max_angle, -bmw_max_angle);
+        print("Violation desired angle\n");
+        //angle is rate limited in carcontrols so it shouldn't exceed max delta
+        float angle_delta_req_side = (bmw_desired_angle_last >= 0.) ? angle_delta_req : -angle_delta_req;
+        violation |= bmw_fmax_limit_check(angle_delta_req_side, angle_rate_up, -angle_rate_down);
+        print("Violation  delta\n");
+
+        if (violation) {
+          tx = false;
+          desired_angle = bmw_desired_angle_last; //nothing was sent - hold to previous
+        }
+      }
+    }
+    bmw_desired_angle_last = desired_angle;
+  }
+
+  return tx;
+}
+
+static safety_config bmw_init(uint16_t param) {
+  UNUSED(param);
+  bmw_speed = 0;
+  lever_position = -1;
+
+  safety_config ret = BUILD_SAFETY_CFG(bmw_rx_checks, BMW_TX_MSGS);
+  ret.disable_forwarding = true;
+
+
+  #ifdef ALLOW_DEBUG
+    print("BMW safety init\n");
+  #endif
+
+  return ret;
+}
+
+const safety_hooks bmw_hooks = {
+  .init = bmw_init,
+  .rx = bmw_rx_hook,
+  .tx = bmw_tx_hook,
+  .get_counter = bmw_get_counter,
+};
