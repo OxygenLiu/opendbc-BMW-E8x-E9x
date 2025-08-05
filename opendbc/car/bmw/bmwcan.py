@@ -1,5 +1,5 @@
 from enum import Enum
-from opendbc.can.packer import CANPacker
+from opendbc.can import CANPacker
 from opendbc.car.bmw.values import CanBus
 
 class SteeringModes(Enum):

@@ -3,7 +3,7 @@ from opendbc.car.bmw import bmwcan
 from opendbc.car.bmw.bmwcan import SteeringModes, CruiseStalk
 from opendbc.car.bmw.values import CarControllerParams, CanBus, BmwFlags
 from opendbc.car.interfaces import CarControllerBase
-from opendbc.can.packer import CANPacker
+from opendbc.can import CANPacker
 from opendbc.car.common.conversions import Conversions as CV
 
 
