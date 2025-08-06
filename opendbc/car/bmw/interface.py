@@ -64,7 +64,7 @@ class CarInterface(CarInterfaceBase):
       return self.get_steer_feedforward
 
   @staticmethod
-  def _get_params(ret, candidate, fingerprint, car_fw, experimental_long, docs):
+  def _get_params(ret, candidate, fingerprint, car_fw, alpha_long, is_release, docs):
     ret.brand = "bmw"
     
     # Runtime cruise control detection - PT-CAN (bus 0) messages
@@ -115,12 +115,11 @@ class CarInterface(CarInterfaceBase):
     ret.steerActuatorDelay = 0.4
     ret.steerLimitTimer = 0.4
 
-    CarInterfaceBase.configure_torque_tune(candidate, ret.lateralTuning)
+    CarInterfaceBase.configure_torque_tune(candidate, ret.lateralTuning, steering_angle_deadzone_deg=0.0)
+    # BMW-specific torque tuning overrides
     ret.lateralTuning.torque.kp = 1.5 / CarControllerParams.STEER_MAX
     ret.lateralTuning.torque.ki = 0.5 / CarControllerParams.STEER_MAX
     ret.lateralTuning.torque.kf = 5.0 / CarControllerParams.STEER_MAX
-    ret.lateralTuning.torque.useSteeringAngle = False
-    ret.lateralTuning.torque.steeringAngleDeadzoneDeg = 0.0 # backlash of stepper?
 
     ret.longitudinalActuatorDelay  = 1.0 #s, Gas/Brake actuator delay
     ret.longitudinalTuning.kpBP = [0.]

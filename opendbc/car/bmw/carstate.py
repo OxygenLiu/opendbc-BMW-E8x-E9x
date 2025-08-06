@@ -49,19 +49,19 @@ class CarState(CarStateBase):
 
     ret.brakePressed = cp_PT.vl["EngineAndBrake"]['BrakePressed'] != 0
     ret.parkingBrake = cp_PT.vl["Status_contact_handbrake"]["Handbrake_pulled_up"] != 0
-    ret.gas = cp_PT.vl['AccPedal']["AcceleratorPedalPercentage"]
     # on some cars, when cruise is engaged, half pressed pedal becomes "KickDownPressed", even without pressing kickdown end stop
     ret.gasPressed = cp_PT.vl['AccPedal']["AcceleratorPedalPressed"] != 0 or cp_PT.vl['AccPedal']["KickDownPressed"] != 0
     self.gas_kickdown = cp_PT.vl['AccPedal']["KickDownPressed"] != 0 #BMW has kickdown button at the bottom of the pedal
 
-    ret.wheelSpeeds = self.get_wheel_speeds(
-      cp_PT.vl["WheelSpeeds"]["Wheel_FL"],
-      cp_PT.vl["WheelSpeeds"]["Wheel_FR"],
-      cp_PT.vl["WheelSpeeds"]["Wheel_RL"],
-      cp_PT.vl["WheelSpeeds"]["Wheel_RR"],
-    )
+    # BMW uses direct speed sensor instead of wheel speeds
     ret.vEgoRaw = cp_PT.vl['Speed']["VehicleSpeed"] * CV.KPH_TO_MS
     ret.vEgo, ret.aEgo = self.update_speed_kf(ret.vEgoRaw)
+    
+    # Set wheel speeds for compatibility but don't override vEgo calculation
+    ret.wheelSpeeds.fl = cp_PT.vl["WheelSpeeds"]["Wheel_FL"] * CV.KPH_TO_MS
+    ret.wheelSpeeds.fr = cp_PT.vl["WheelSpeeds"]["Wheel_FR"] * CV.KPH_TO_MS
+    ret.wheelSpeeds.rl = cp_PT.vl["WheelSpeeds"]["Wheel_RL"] * CV.KPH_TO_MS
+    ret.wheelSpeeds.rr = cp_PT.vl["WheelSpeeds"]["Wheel_RR"] * CV.KPH_TO_MS
     ret.vEgoCluster = ret.vEgo + CruiseSettings.CLUSTER_OFFSET * CV.KPH_TO_MS
     ret.standstill = not cp_PT.vl['Speed']["MovingForward"] and not cp_PT.vl['Speed']["MovingReverse"]
     ret.yawRate = cp_PT.vl['Speed']["YawRate"] * CV.DEG_TO_RAD
