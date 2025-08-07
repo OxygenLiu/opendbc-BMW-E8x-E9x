@@ -234,6 +234,114 @@ class TestBMWRoutes:
       f"Missing test route for BMW {car_name}. Add route to opendbc/car/tests/routes.py"
 
 
+class TestBMWCANParsing:
+  """BMW CAN message parsing validation tests - prevents parser misconfiguration"""
+  
+  def test_can_parser_configuration(self):
+    """Test that BMW CAN parsers are correctly configured for each bus"""
+    from opendbc.car.bmw.carstate import CarState
+    from opendbc.car.bmw.values import BmwFlags
+    
+    # Test all BMW car configurations
+    for car_model in CAR:
+      # Create CarParams with all BMW feature flags
+      CP = CarParams()
+      CP.carFingerprint = car_model
+      CP.flags = int(BmwFlags.DYNAMIC_CRUISE_CONTROL | BmwFlags.STEPPER_SERVO_CAN)
+      
+      # This should not raise any exceptions
+      can_parsers = CarState.get_can_parsers(CP)
+      
+      # Verify all required parsers exist
+      assert Bus.pt in can_parsers, f"Missing PT-CAN parser for {car_model}"
+      assert Bus.body in can_parsers, f"Missing F-CAN parser for {car_model}"  
+      assert Bus.alt in can_parsers, f"Missing Servo-CAN parser for {car_model}"
+      
+      # Verify parsers use correct DBC files
+      from opendbc.car.bmw.values import DBC
+      pt_parser = can_parsers[Bus.pt]
+      f_parser = can_parsers[Bus.body]
+      servo_parser = can_parsers[Bus.alt]
+      
+      # PT-CAN parser should use PT DBC
+      assert pt_parser.dbc_name == DBC[car_model][Bus.pt], \
+        f"PT-CAN parser using wrong DBC for {car_model}"
+      
+      # F-CAN parser should use Body DBC (not PT DBC - this was the bug!)
+      assert f_parser.dbc_name == DBC[car_model][Bus.body], \
+        f"F-CAN parser using wrong DBC for {car_model}. This prevents canValid=False!"
+      
+      # Servo parser should use ocelot_controls
+      assert servo_parser.dbc_name == 'ocelot_controls', \
+        f"Servo parser using wrong DBC for {car_model}"
+
+  def test_critical_can_messages_bus_assignment(self):
+    """Test that critical BMW CAN messages are assigned to correct buses"""
+    from opendbc.car.bmw.carstate import CarState
+    from opendbc.car.bmw.values import BmwFlags, CanBus
+    
+    for car_model in CAR:
+      # Test with DCC enabled (most complex configuration)  
+      CP = CarParams()
+      CP.carFingerprint = car_model
+      CP.flags = int(BmwFlags.DYNAMIC_CRUISE_CONTROL | BmwFlags.STEPPER_SERVO_CAN)
+      
+      can_parsers = CarState.get_can_parsers(CP)
+      
+      # Verify PT-CAN parser has expected messages by checking vl dict
+      pt_parser = can_parsers[Bus.pt]
+      pt_expected_messages = ["EngineAndBrake", "AccPedal", "Speed", "SteeringWheelAngle", 
+                              "TransmissionDataDisplay", "DynamicCruiseControlStatus"]
+      for msg in pt_expected_messages:
+        assert msg in pt_parser.vl, \
+          f"{msg} missing from PT-CAN parser vl dict for {car_model}"
+      
+      # Verify F-CAN parser has expected messages (this was the bug!)
+      f_parser = can_parsers[Bus.body]  
+      f_expected_messages = ["SteeringWheelAngle_DSC", "CruiseControlStalk"]
+      for msg in f_expected_messages:
+        assert msg in f_parser.vl, \
+          f"{msg} missing from F-CAN parser vl dict for {car_model}"
+      
+      # Verify Servo parser has expected messages
+      servo_parser = can_parsers[Bus.alt]
+      assert "STEERING_STATUS" in servo_parser.vl, \
+        f"STEERING_STATUS missing from Servo parser vl dict for {car_model}"
+
+  def test_steering_angle_message_parsing(self):
+    """Test that steering angle messages can be parsed correctly from their buses"""
+    from opendbc.car.bmw.carstate import CarState
+    from opendbc.car.bmw.values import BmwFlags
+    
+    for car_model in CAR:
+      # Test DCC configuration (uses both PT-CAN and F-CAN steering messages)
+      CP = CarParams()
+      CP.carFingerprint = car_model  
+      CP.flags = int(BmwFlags.DYNAMIC_CRUISE_CONTROL)
+      
+      # Create CarState instance
+      CS = CarState(CP)
+      can_parsers = CarState.get_can_parsers(CP)
+      
+      # Verify CarState can access both steering angle sources
+      # This ensures the F-CAN parser fix allows proper fallback logic
+      pt_parser = can_parsers[Bus.pt] 
+      f_parser = can_parsers[Bus.body]
+      
+      # PT-CAN should have SteeringWheelAngle
+      assert "SteeringWheelAngle" in pt_parser.vl, \
+        f"SteeringWheelAngle missing from PT-CAN parser for {car_model}"
+      
+      # F-CAN should have SteeringWheelAngle_DSC  
+      assert "SteeringWheelAngle_DSC" in f_parser.vl, \
+        f"SteeringWheelAngle_DSC missing from F-CAN parser for {car_model}"
+      
+      # Verify both parsers can be created without DBC errors
+      # This validates the F-CAN parser uses correct Body DBC, not PT DBC
+      assert pt_parser is not None, f"PT-CAN parser creation failed for {car_model}"
+      assert f_parser is not None, f"F-CAN parser creation failed for {car_model}"
+
+
 class TestBMWLateralLimits:
   """BMW-specific lateral limits tests"""
   

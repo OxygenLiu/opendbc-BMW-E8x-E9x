@@ -100,7 +100,12 @@ class CarState(CarStateBase):
 
     cruise_control_stal_msg = cp_PT.vl["CruiseControlStalk"]
     if self.CP.flags & BmwFlags.DYNAMIC_CRUISE_CONTROL:
-      ret.steeringAngleDeg = cp_F.vl['SteeringWheelAngle_DSC']['SteeringPosition']  # slightly quicker on F-CAN TODO find the factor and put in DBC
+      # Try to get steering angle from F-CAN, fallback to PT-CAN if not available
+      try:
+        ret.steeringAngleDeg = cp_F.vl['SteeringWheelAngle_DSC']['SteeringPosition']  # slightly quicker on F-CAN TODO find the factor and put in DBC
+      except KeyError:
+        # Fallback to PT-CAN steering wheel angle if F-CAN message not available
+        ret.steeringAngleDeg = cp_PT.vl['SteeringWheelAngle']['SteeringPosition']
       ret.cruiseState.speed = cp_PT.vl["DynamicCruiseControlStatus"]['CruiseControlSetpointSpeed'] * (CV.KPH_TO_MS if self.is_metric else CV.MPH_TO_MS)
       ret.cruiseState.enabled = cp_PT.vl["DynamicCruiseControlStatus"]['CruiseActive'] != 0
       # DCC implies that cruise control is done on F-CAN
@@ -222,6 +227,6 @@ class CarState(CarStateBase):
 
     return {
       Bus.pt: CANParser(DBC[CP.carFingerprint][Bus.pt], pt_messages, CanBus.PT_CAN),
-      Bus.body: CANParser(DBC[CP.carFingerprint][Bus.pt], fcan_messages, CanBus.F_CAN),
+      Bus.body: CANParser(DBC[CP.carFingerprint][Bus.body], fcan_messages, CanBus.F_CAN),
       Bus.alt: CANParser('ocelot_controls', servo_can_messages, CanBus.SERVO_CAN),
     }
