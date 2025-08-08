@@ -35,7 +35,7 @@ class CarState(CarStateBase):
   def update(self, can_parsers) -> structs.CarState:
     cp_PT = can_parsers[Bus.pt]
     cp_F = can_parsers[Bus.body]
-    cp_aux = can_parsers[Bus.alt]
+    cp_aux = can_parsers.get(Bus.alt)  # May not exist if no servo CAN messages
 
     ret = structs.CarState()
 
@@ -68,11 +68,34 @@ class CarState(CarStateBase):
     ret.steeringRateDeg = cp_PT.vl["SteeringWheelAngle"]['SteeringSpeed']
     can_gear = int(cp_PT.vl["TransmissionDataDisplay"]['ShiftLeverPosition'])
     ret.gearShifter = self.parse_gear_shifter(self.shifter_values.get(can_gear, None))
-    blinker_on = cp_PT.vl["TurnSignals"]['TurnSignalActive'] != 0 and cp_PT.vl["TurnSignals"]['TurnSignalIdle'] == 0
-    ret.leftBlinker = blinker_on and cp_PT.vl["TurnSignals"]['LeftTurn'] !=0   # blinking
-    ret.rightBlinker = blinker_on and cp_PT.vl["TurnSignals"]['RightTurn'] !=0   # blinking
-    self.right_blinker_pressed = not blinker_on and cp_PT.vl["TurnSignals"]['RightTurn'] != 0
-    self.left_blinker_pressed = not blinker_on and cp_PT.vl["TurnSignals"]['LeftTurn'] != 0
+    # Turn signals: TurnSignals message (0x1F6) doesn't exist on BMW E90
+    # Turn signal information is embedded in StatusDSC_KCAN (0x19E) bytes 5,6,7
+    # Based on analysis of CAN data with active right turn signal usage
+    
+    # Extract turn signal state from StatusDSC_KCAN message
+    dsc_data = cp_PT.vl["StatusDSC_KCAN"]
+    
+    # Get raw message data to access individual bytes (need to access via parser internals)
+    # For now, use a simplified approach based on known DSC message structure
+    # TODO: This needs proper byte-level CAN message access - currently approximating
+    
+    # Temporary implementation using available DSC signals until we get byte-level access
+    # Turn signal active indication appears to correlate with DSC activity
+    dsc_active = dsc_data.get('DTC_on', 0) != 0 or dsc_data.get('DSC_full_off', 0) == 0
+    
+    # PLACEHOLDER: Simplified turn signal detection
+    # Real implementation needs byte 5 bit 6 (0x40) for turn signal active
+    # and additional logic to distinguish left vs right from bytes 6,7
+    ret.leftBlinker = False   # TODO: Implement left turn signal detection from StatusDSC_KCAN bytes
+    ret.rightBlinker = False  # TODO: Implement right turn signal detection from StatusDSC_KCAN bytes
+    self.right_blinker_pressed = False
+    self.left_blinker_pressed = False
+    
+    # CRITICAL TODO: Complete implementation requires:
+    # 1. Access to raw CAN message bytes from StatusDSC_KCAN (0x19E)
+    # 2. Check byte 5 bit 6 (0x40) for turn signal active flag  
+    # 3. Use bytes 6,7 patterns to distinguish left vs right turn signals
+    # 4. Test with left turn signal data to confirm left/right detection logic
 
     self.dtc_mode = cp_PT.vl['StatusDSC_KCAN']['DTC_on'] != 0 # drifty traction control ;)
 
@@ -152,12 +175,13 @@ class CarState(CarStateBase):
     ret.genericToggle = self.dtc_mode
 
     if self.CP.flags & BmwFlags.STEPPER_SERVO_CAN:
-      ret.steeringTorqueEps =  cp_aux.vl['STEERING_STATUS']['STEERING_TORQUE']
-      ret.steeringAngleOffsetDeg = ret.steeringAngleDeg - cp_aux.vl['STEERING_STATUS']['STEERING_ANGLE']
-      ret.steerFaultTemporary = int(cp_aux.vl['STEERING_STATUS']['DEBUG_STATES']) & 0x20 != 0 # Comm error
-      ret.steerFaultTemporary |= int(cp_aux.vl['STEERING_STATUS']['DEBUG_STATES']) & 0x40 != 0 # motion task overrun
-      ret.steerFaultTemporary |= int(cp_aux.vl['STEERING_STATUS']['DEBUG_STATES']) & 0x80 != 0 # service task overrun
-      ret.steerFaultTemporary = int(cp_aux.vl['STEERING_STATUS']['CONTROL_STATUS']) & 0x4 != 0 # SOFT_OFF lockout
+      # STEERING_STATUS is now on F-CAN (cp_F), not Servo-CAN (cp_aux)
+      ret.steeringTorqueEps =  cp_F.vl['STEERING_STATUS']['STEERING_TORQUE']
+      ret.steeringAngleOffsetDeg = ret.steeringAngleDeg - cp_F.vl['STEERING_STATUS']['STEERING_ANGLE']
+      ret.steerFaultTemporary = int(cp_F.vl['STEERING_STATUS']['DEBUG_STATES']) & 0x20 != 0 # Comm error
+      ret.steerFaultTemporary |= int(cp_F.vl['STEERING_STATUS']['DEBUG_STATES']) & 0x40 != 0 # motion task overrun
+      ret.steerFaultTemporary |= int(cp_F.vl['STEERING_STATUS']['DEBUG_STATES']) & 0x80 != 0 # service task overrun
+      ret.steerFaultTemporary = int(cp_F.vl['STEERING_STATUS']['CONTROL_STATUS']) & 0x4 != 0 # SOFT_OFF lockout
 
     self.prev_gas_pressed = ret.gasPressed
 
@@ -191,7 +215,7 @@ class CarState(CarStateBase):
       ("AccPedal", 100),
       ("Speed", 50),
       ("SteeringWheelAngle", 100),
-      ("TurnSignals", 0),
+      # ("TurnSignals", 0),  # Message 0x1F6 doesn't exist on BMW E90 - turn signals embedded in StatusDSC_KCAN
       ("SteeringButtons", 0),
       ("WheelSpeeds", 50), # 100 on F-CAN
       ("CruiseControlStalk", 5),
@@ -218,15 +242,24 @@ class CarState(CarStateBase):
         ("SteeringWheelAngle_DSC", 100),
       ]
 
-    # if the car is equipped with custom actuator
-    servo_can_messages = []
+    # STEERING_STATUS is on F-CAN (bus 1) but uses ocelot_controls DBC, not BMW DBC
+    # So we need a separate parser for it on F-CAN bus
+    ocelot_fcan_messages = []
     if CP.flags & BmwFlags.STEPPER_SERVO_CAN:
-      servo_can_messages += [ # message, expected frequency
-      ("STEERING_STATUS", 100),
+      ocelot_fcan_messages += [ # message, expected frequency
+        ("STEERING_STATUS", 100),
       ]
 
-    return {
+    # No messages on Servo-CAN bus for this BMW variant
+    servo_can_messages = []
+
+    parsers = {
       Bus.pt: CANParser(DBC[CP.carFingerprint][Bus.pt], pt_messages, CanBus.PT_CAN),
       Bus.body: CANParser(DBC[CP.carFingerprint][Bus.body], fcan_messages, CanBus.F_CAN),
-      Bus.alt: CANParser('ocelot_controls', servo_can_messages, CanBus.SERVO_CAN),
     }
+    
+    # Add ocelot_controls parser on F-CAN if STEERING_STATUS is needed
+    if ocelot_fcan_messages:
+      parsers[Bus.alt] = CANParser('ocelot_controls', ocelot_fcan_messages, CanBus.F_CAN)
+    
+    return parsers
