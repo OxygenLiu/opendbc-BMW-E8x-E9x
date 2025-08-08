@@ -68,34 +68,21 @@ class CarState(CarStateBase):
     ret.steeringRateDeg = cp_PT.vl["SteeringWheelAngle"]['SteeringSpeed']
     can_gear = int(cp_PT.vl["TransmissionDataDisplay"]['ShiftLeverPosition'])
     ret.gearShifter = self.parse_gear_shifter(self.shifter_values.get(can_gear, None))
-    # Turn signals: TurnSignals message (0x1F6) doesn't exist on BMW E90
-    # Turn signal information is embedded in StatusDSC_KCAN (0x19E) bytes 5,6,7
-    # Based on analysis of CAN data with active right turn signal usage
-    
-    # Extract turn signal state from StatusDSC_KCAN message
-    dsc_data = cp_PT.vl["StatusDSC_KCAN"]
-    
-    # Get raw message data to access individual bytes (need to access via parser internals)
-    # For now, use a simplified approach based on known DSC message structure
-    # TODO: This needs proper byte-level CAN message access - currently approximating
-    
-    # Temporary implementation using available DSC signals until we get byte-level access
-    # Turn signal active indication appears to correlate with DSC activity
-    dsc_active = dsc_data.get('DTC_on', 0) != 0 or dsc_data.get('DSC_full_off', 0) == 0
-    
-    # PLACEHOLDER: Simplified turn signal detection
-    # Real implementation needs byte 5 bit 6 (0x40) for turn signal active
-    # and additional logic to distinguish left vs right from bytes 6,7
-    ret.leftBlinker = False   # TODO: Implement left turn signal detection from StatusDSC_KCAN bytes
-    ret.rightBlinker = False  # TODO: Implement right turn signal detection from StatusDSC_KCAN bytes
-    self.right_blinker_pressed = False
-    self.left_blinker_pressed = False
-    
-    # CRITICAL TODO: Complete implementation requires:
-    # 1. Access to raw CAN message bytes from StatusDSC_KCAN (0x19E)
-    # 2. Check byte 5 bit 6 (0x40) for turn signal active flag  
-    # 3. Use bytes 6,7 patterns to distinguish left vs right turn signals
-    # 4. Test with left turn signal data to confirm left/right detection logic
+    # Turn signals: Use TurnSignals message (0x1F6) which exists at ~1.5Hz
+    # Message was found in route data on both bus 0 (PT-CAN) and bus 2 (K-CAN)
+    try:
+      turn_signals = cp_PT.vl["TurnSignals"]
+      ret.leftBlinker = turn_signals.get('LeftTurn', 0) != 0
+      ret.rightBlinker = turn_signals.get('RightTurn', 0) != 0
+      self.left_blinker_pressed = ret.leftBlinker
+      self.right_blinker_pressed = ret.rightBlinker
+    except KeyError:
+      # Fallback: Turn signals may also be embedded in StatusDSC_KCAN (0x19E) 
+      # This is backup logic if TurnSignals message is not available
+      ret.leftBlinker = False
+      ret.rightBlinker = False  
+      self.left_blinker_pressed = False
+      self.right_blinker_pressed = False
 
     self.dtc_mode = cp_PT.vl['StatusDSC_KCAN']['DTC_on'] != 0 # drifty traction control ;)
 
@@ -215,7 +202,7 @@ class CarState(CarStateBase):
       ("AccPedal", 100),
       ("Speed", 50),
       ("SteeringWheelAngle", 100),
-      # ("TurnSignals", 0),  # Message 0x1F6 doesn't exist on BMW E90 - turn signals embedded in StatusDSC_KCAN
+      ("TurnSignals", 2),  # RESTORED: Message 0x1F6 exists at ~1.5Hz - found in route data!
       ("SteeringButtons", 0),
       ("WheelSpeeds", 50), # 100 on F-CAN
       ("CruiseControlStalk", 5),
