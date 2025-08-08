@@ -262,4 +262,12 @@ class CarState(CarStateBase):
     if ocelot_fcan_messages:
       parsers[Bus.alt] = CANParser('ocelot_controls', ocelot_fcan_messages, CanBus.F_CAN)
     
+    # BMW FIX: Set ignore_checksum=True for all BMW messages to match panda safety config
+    # BMW panda safety uses .ignore_checksum = true for all messages, but CANParser defaults to False
+    for parser in parsers.values():
+      if parser.dbc_name == 'bmw_e9x_e8x':  # Only apply to BMW DBC messages, not ocelot_controls
+        for message_state in parser.message_states.values():
+          message_state.ignore_checksum = True
+          message_state.ignore_counter = True  # Also ignore counters as per panda safety
+    
     return parsers
