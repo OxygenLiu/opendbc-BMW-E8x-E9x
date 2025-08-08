@@ -68,21 +68,11 @@ class CarState(CarStateBase):
     ret.steeringRateDeg = cp_PT.vl["SteeringWheelAngle"]['SteeringSpeed']
     can_gear = int(cp_PT.vl["TransmissionDataDisplay"]['ShiftLeverPosition'])
     ret.gearShifter = self.parse_gear_shifter(self.shifter_values.get(can_gear, None))
-    # Turn signals: Use TurnSignals message (0x1F6) which exists at ~1.5Hz
-    # Message was found in route data on both bus 0 (PT-CAN) and bus 2 (K-CAN)
-    try:
-      turn_signals = cp_PT.vl["TurnSignals"]
-      ret.leftBlinker = turn_signals.get('LeftTurn', 0) != 0
-      ret.rightBlinker = turn_signals.get('RightTurn', 0) != 0
-      self.left_blinker_pressed = ret.leftBlinker
-      self.right_blinker_pressed = ret.rightBlinker
-    except KeyError:
-      # Fallback: Turn signals may also be embedded in StatusDSC_KCAN (0x19E) 
-      # This is backup logic if TurnSignals message is not available
-      ret.leftBlinker = False
-      ret.rightBlinker = False  
-      self.left_blinker_pressed = False
-      self.right_blinker_pressed = False
+    # Turn signals
+    ret.leftBlinker = cp_PT.vl["TurnSignals"]['LeftTurn'] != 0
+    ret.rightBlinker = cp_PT.vl["TurnSignals"]['RightTurn'] != 0
+    self.left_blinker_pressed = ret.leftBlinker
+    self.right_blinker_pressed = ret.rightBlinker
 
     self.dtc_mode = cp_PT.vl['StatusDSC_KCAN']['DTC_on'] != 0 # drifty traction control ;)
 
