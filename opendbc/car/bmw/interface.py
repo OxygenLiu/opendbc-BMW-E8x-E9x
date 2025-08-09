@@ -72,8 +72,10 @@ class CarInterface(CarInterfaceBase):
     has_dynamic_cruise = 0x193 in fingerprint.get(CanBus.PT_CAN, {})
     has_ldm = 0x0D5 in fingerprint.get(CanBus.PT_CAN, {})
     
-    # Runtime stepper servo detection - F-CAN/SERVO-CAN (bus 1) messages
-    if 0x22F in fingerprint.get(CanBus.SERVO_CAN, {}):
+    # Runtime stepper servo detection - can be on SERVO_CAN (bus 1) or AUX_CAN (bus 2)
+    # BMW panda safety accepts STEERING_STATUS (0x22F) on either bus
+    if (0x22F in fingerprint.get(CanBus.SERVO_CAN, {}) or 
+        0x22F in fingerprint.get(CanBus.AUX_CAN, {})):
       ret.flags |= BmwFlags.STEPPER_SERVO_CAN.value
 
     ret.openpilotLongitudinalControl = True
@@ -110,6 +112,10 @@ class CarInterface(CarInterfaceBase):
 
     ret.safetyConfigs = [get_safety_config(structs.CarParams.SafetyModel.bmw)]
     ret.safetyConfigs[0].safetyParam = 0
+    
+    # BMW Debug: Log safety configuration
+    from opendbc.car.carlog import carlog
+    carlog.warning(f"BMW Debug: Configured BMW safety model (ID={structs.CarParams.SafetyModel.bmw}) for {ret.carFingerprint}")
 
     ret.steerControlType = structs.CarParams.SteerControlType.torque
     ret.steerActuatorDelay = 0.4

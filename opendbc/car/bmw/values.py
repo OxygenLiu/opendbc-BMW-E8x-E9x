@@ -33,8 +33,9 @@ class CruiseSettings:
 
 class CanBus:
   PT_CAN =    0
-  SERVO_CAN = 1 # required for steering
+  SERVO_CAN = 1 # required for steering (STEPPER_SERVO can be on this bus)
   F_CAN =     1 # required for DYNAMIC_CRUISE_CONTROL or optional for logging
+  AUX_CAN =   2 # alternative bus for STEPPER_SERVO messages (matches BMW_AUX_CAN in bmw.h)
   K_CAN =     2 # not used - only logging
 
 
