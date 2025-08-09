@@ -19,6 +19,10 @@ static float interpolate(struct lookup_t xy, float x);
 #define BMW_AUX_CAN 2
 
 
+// BMW CAN bus routing: During initial diagnostic phase (~10s), BMW PT-CAN messages 
+// may appear on both bus 0 and bus 2. After stabilization, they appear only on bus 0.
+// RX_CHECKS are configured to validate messages only on BMW_PT_CAN (bus 0) to avoid
+// double-counting during the diagnostic phase.
 RxCheck bmw_rx_checks[] = {  // todo add .check_checksum
   {.msg = {{BMW_EngineAndBrake,       BMW_PT_CAN, 8, .max_counter = 15U, .frequency = 100U, .ignore_checksum = true}, { 0 }, { 0 }}},
   {.msg = {{BMW_AccPedal,             BMW_PT_CAN, 8, .max_counter = 15U, .frequency = 100U, .ignore_checksum = true}, { 0 }, { 0 }}},
@@ -106,13 +110,33 @@ float actuator_torque = 0;
 
 static void bmw_rx_hook(const CANPacket_t *to_push) {
   #ifdef ALLOW_DEBUG
-    // Debug: Print first few message addresses to see what we're receiving
+    // Debug: Track BMW RX_CHECK messages specifically
     static int debug_msg_count = 0;
-    if (debug_msg_count < 20) {  // Only print first 20 messages
-      print("BMW RX: 0x");
-      puth16(to_push->addr);
-      print("\n");
-      debug_msg_count++;
+    if (debug_msg_count < 50) {  // Print more messages during diagnostic phase
+      bool is_rx_check_msg = (to_push->addr == BMW_EngineAndBrake) || 
+                             (to_push->addr == BMW_AccPedal) ||
+                             (to_push->addr == BMW_Speed) ||
+                             (to_push->addr == BMW_TransmissionDataDisplay) ||
+                             (to_push->addr == BMW_DynamicCruiseControlStatus) ||
+                             (to_push->addr == 0x22f);
+      
+      if (is_rx_check_msg) {
+        print("BMW RX: 0x");
+        puth16(to_push->addr);
+        print(" bus:");
+        puth(to_push->bus);
+        if (to_push->bus == BMW_PT_CAN) {
+          print(" (PT-CAN)");
+        } else if (to_push->bus == BMW_F_CAN) {
+          print(" (F-CAN)");
+        } else if (to_push->bus == BMW_AUX_CAN) {
+          print(" (AUX-CAN)");
+        } else {
+          print(" (UNKNOWN)");
+        }
+        print("\n");
+        debug_msg_count++;
+      }
     }
   #endif
 
