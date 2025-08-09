@@ -35,7 +35,8 @@ class CarState(CarStateBase):
   def update(self, can_parsers) -> structs.CarState:
     cp_PT = can_parsers[Bus.pt]
     cp_F = can_parsers[Bus.body]
-    cp_aux = can_parsers.get(Bus.alt)  # May not exist if no servo CAN messages
+    cp_servo = can_parsers.get('ocelot_servo')  # STEPPER_SERVO on SERVO_CAN (bus 1)
+    cp_aux = can_parsers.get('ocelot_aux')      # STEPPER_SERVO on AUX_CAN (bus 2)
 
     ret = structs.CarState()
 
@@ -68,6 +69,18 @@ class CarState(CarStateBase):
     ret.steeringRateDeg = cp_PT.vl["SteeringWheelAngle"]['SteeringSpeed']
     can_gear = int(cp_PT.vl["TransmissionDataDisplay"]['ShiftLeverPosition'])
     ret.gearShifter = self.parse_gear_shifter(self.shifter_values.get(can_gear, None))
+    
+    # BMW CAN-based ignition detection
+    # Use TerminalStatus message to detect ignition state when physical wire unreliable
+    if "TerminalStatus" in cp_PT.vl:
+      # ST_KL_15 = 1 means ignition is ON (Terminal 15 in BMW terminology)
+      bmw_ignition_on = cp_PT.vl["TerminalStatus"]["ST_KL_15"] > 0
+      
+      # Override ignition detection with CAN signal when available
+      if bmw_ignition_on:
+        ret.ignitionLine = True
+        ret.ignitionCan = True
+    
     # Turn signals
     ret.leftBlinker = cp_PT.vl["TurnSignals"]['LeftTurn'] != 0
     ret.rightBlinker = cp_PT.vl["TurnSignals"]['RightTurn'] != 0
@@ -152,13 +165,23 @@ class CarState(CarStateBase):
     ret.genericToggle = self.dtc_mode
 
     if self.CP.flags & BmwFlags.STEPPER_SERVO_CAN:
-      # STEERING_STATUS is now on F-CAN (cp_F), not Servo-CAN (cp_aux)
-      ret.steeringTorqueEps =  cp_F.vl['STEERING_STATUS']['STEERING_TORQUE']
-      ret.steeringAngleOffsetDeg = ret.steeringAngleDeg - cp_F.vl['STEERING_STATUS']['STEERING_ANGLE']
-      ret.steerFaultTemporary = int(cp_F.vl['STEERING_STATUS']['DEBUG_STATES']) & 0x20 != 0 # Comm error
-      ret.steerFaultTemporary |= int(cp_F.vl['STEERING_STATUS']['DEBUG_STATES']) & 0x40 != 0 # motion task overrun
-      ret.steerFaultTemporary |= int(cp_F.vl['STEERING_STATUS']['DEBUG_STATES']) & 0x80 != 0 # service task overrun
-      ret.steerFaultTemporary = int(cp_F.vl['STEERING_STATUS']['CONTROL_STATUS']) & 0x4 != 0 # SOFT_OFF lockout
+      # STEERING_STATUS can be on either SERVO_CAN (bus 1) or AUX_CAN (bus 2) - find it dynamically
+      steering_parser = None
+      
+      # Check SERVO_CAN parser first
+      if cp_servo and 'STEERING_STATUS' in cp_servo.vl:
+        steering_parser = cp_servo
+      # Check AUX_CAN parser if not found on SERVO_CAN
+      elif cp_aux and 'STEERING_STATUS' in cp_aux.vl:
+        steering_parser = cp_aux
+      
+      if steering_parser:
+        ret.steeringTorqueEps = steering_parser.vl['STEERING_STATUS']['STEERING_TORQUE']
+        ret.steeringAngleOffsetDeg = ret.steeringAngleDeg - steering_parser.vl['STEERING_STATUS']['STEERING_ANGLE']
+        ret.steerFaultTemporary = int(steering_parser.vl['STEERING_STATUS']['DEBUG_STATES']) & 0x20 != 0 # Comm error
+        ret.steerFaultTemporary |= int(steering_parser.vl['STEERING_STATUS']['DEBUG_STATES']) & 0x40 != 0 # motion task overrun
+        ret.steerFaultTemporary |= int(steering_parser.vl['STEERING_STATUS']['DEBUG_STATES']) & 0x80 != 0 # service task overrun
+        ret.steerFaultTemporary = int(steering_parser.vl['STEERING_STATUS']['CONTROL_STATUS']) & 0x4 != 0 # SOFT_OFF lockout
 
     self.prev_gas_pressed = ret.gasPressed
 
@@ -219,32 +242,36 @@ class CarState(CarStateBase):
         ("SteeringWheelAngle_DSC", 100),
       ]
 
-    # STEERING_STATUS is on F-CAN (bus 1) but uses ocelot_controls DBC, not BMW DBC
-    # So we need a separate parser for it on F-CAN bus
-    ocelot_fcan_messages = []
+    # STEERING_STATUS can be on either SERVO_CAN (bus 1) or AUX_CAN (bus 2)
+    # BMW panda safety accepts it on either bus, so we create parsers for both
+    ocelot_servo_messages = []
+    ocelot_aux_messages = []
+    
     if CP.flags & BmwFlags.STEPPER_SERVO_CAN:
-      ocelot_fcan_messages += [ # message, expected frequency
-        ("STEERING_STATUS", 100),
-      ]
-
-    # No messages on Servo-CAN bus for this BMW variant
-    servo_can_messages = []
+      # Create message list for both possible buses
+      steering_status_msg = [("STEERING_STATUS", 100)]
+      ocelot_servo_messages += steering_status_msg
+      ocelot_aux_messages += steering_status_msg
 
     parsers = {
       Bus.pt: CANParser(DBC[CP.carFingerprint][Bus.pt], pt_messages, CanBus.PT_CAN),
       Bus.body: CANParser(DBC[CP.carFingerprint][Bus.body], fcan_messages, CanBus.F_CAN),
     }
     
-    # Add ocelot_controls parser on F-CAN if STEERING_STATUS is needed
-    if ocelot_fcan_messages:
-      parsers[Bus.alt] = CANParser('ocelot_controls', ocelot_fcan_messages, CanBus.F_CAN)
+    # Add ocelot_controls parsers for STEERING_STATUS on both possible buses
+    if ocelot_servo_messages:
+      parsers['ocelot_servo'] = CANParser('ocelot_controls', ocelot_servo_messages, CanBus.SERVO_CAN)
+    
+    if ocelot_aux_messages:
+      parsers['ocelot_aux'] = CANParser('ocelot_controls', ocelot_aux_messages, CanBus.AUX_CAN)
     
     # BMW FIX: Set ignore_checksum=True for all BMW messages to match panda safety config
     # BMW panda safety uses .ignore_checksum = true for all messages, but CANParser defaults to False
+    # Note: We do NOT set ignore_counter=True because Panda safety already validates counters properly
     for parser in parsers.values():
       if parser.dbc_name == 'bmw_e9x_e8x':  # Only apply to BMW DBC messages, not ocelot_controls
         for message_state in parser.message_states.values():
           message_state.ignore_checksum = True
-          message_state.ignore_counter = True  # Also ignore counters as per panda safety
+          # Counter validation is handled by Panda safety layer - no need to ignore here
     
     return parsers
