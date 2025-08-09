@@ -105,6 +105,16 @@ float actuator_torque = 0;
 
 
 static void bmw_rx_hook(const CANPacket_t *to_push) {
+  #ifdef ALLOW_DEBUG
+    // Debug: Print first few message addresses to see what we're receiving
+    static int debug_msg_count = 0;
+    if (debug_msg_count < 20) {  // Only print first 20 messages
+      print("BMW RX: 0x");
+      puth16(to_push->addr);
+      print("\n");
+      debug_msg_count++;
+    }
+  #endif
 
   bool cruise_engaged = false;
   if ((to_push->addr == BMW_DynamicCruiseControlStatus) || (to_push->addr == BMW_CruiseControlStatus)) { //handles both vehicle options VO544 and Vo540
@@ -268,6 +278,9 @@ static safety_config bmw_init(uint16_t param) {
 
   #ifdef ALLOW_DEBUG
     print("BMW safety init\n");
+    print("BMW RX checks count: ");
+    puth(sizeof(bmw_rx_checks)/sizeof(bmw_rx_checks[0]));
+    print("\n");
   #endif
 
   return ret;
