@@ -122,7 +122,7 @@ static void bmw_rx_hook(const CANPacket_t *to_push) {
       
       if (is_rx_check_msg) {
         print("BMW RX: 0x");
-        puth16(to_push->addr);
+        puth(to_push->addr);
         print(" bus:");
         puth(to_push->bus);
         if (to_push->bus == BMW_PT_CAN) {
