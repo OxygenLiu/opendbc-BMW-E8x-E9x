@@ -1,3 +1,4 @@
+from opendbc.car.bmw.values import BmwFlags
 from opendbc.car.ford.values import FordSafetyFlags
 from opendbc.car.hyundai.values import HyundaiSafetyFlags
 from opendbc.car.toyota.values import ToyotaSafetyFlags
@@ -38,6 +39,9 @@ def is_steering_msg(mode, param, addr):
     ret = addr == 0x120
   elif mode == CarParams.SafetyModel.tesla:
     ret = addr == 0x488
+  elif mode == CarParams.SafetyModel.bmw:
+    # BMW uses stepper servo for steering control (not traditional torque messages)
+    ret = addr == 0x22e  # STEPPER_SERVO command
   return ret
 
 
@@ -78,6 +82,14 @@ def get_steer_value(mode, param, msg):
     torque = ((msg.data[2] << 3) | (msg.data[3] >> 5)) - 1024
   elif mode == CarParams.SafetyModel.tesla:
     angle = (((msg.data[0] & 0x7F) << 8) | (msg.data[1])) - 16384  # ceil(1638.35/0.1)
+  elif mode == CarParams.SafetyModel.bmw:
+    # BMW stepper servo uses torque control mode (extract torque from STEPPER_SERVO command)
+    # Torque is in data[4] as signed 8-bit value (raw torque * CAN_ACTUATOR_TQ_FAC)
+    if len(msg.data) >= 5:
+      torque = msg.data[4]
+      # Convert unsigned to signed 8-bit
+      if torque > 127:
+        torque = torque - 256
   return torque, angle
 
 
