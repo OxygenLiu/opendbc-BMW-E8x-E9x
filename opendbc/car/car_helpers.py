@@ -152,6 +152,8 @@ def get_car(can_recv: CanRecvCallable, can_send: CanSendCallable, set_obd_multip
             is_release: bool, num_pandas: int = 1, cached_params: CarParamsT | None = None):
   candidate, fingerprints, vin, car_fw, source, exact_match = fingerprint(can_recv, can_send, set_obd_multiplexing, num_pandas, cached_params)
 
+  carlog.warning(f"BMW Debug: Fingerprinting result - candidate={candidate}, vin={vin[:10] if vin else 'None'}..., source={source}, exact_match={exact_match}")
+
   if candidate is None:
     carlog.error({"event": "car doesn't match any fingerprints", "fingerprints": repr(fingerprints)})
     candidate = "MOCK"
@@ -162,6 +164,8 @@ def get_car(can_recv: CanRecvCallable, can_send: CanSendCallable, set_obd_multip
   CP.carFw = car_fw
   CP.fingerprintSource = source
   CP.fuzzyFingerprint = not exact_match
+
+  carlog.warning(f"BMW Debug: Final car params - carFingerprint={CP.carFingerprint}, brand={CP.brand}")
 
   return interfaces[CP.carFingerprint](CP)
 
