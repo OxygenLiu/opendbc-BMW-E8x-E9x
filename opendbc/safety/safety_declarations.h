@@ -3,6 +3,8 @@
 #include <stdint.h>
 #include <stdbool.h>
 
+#define GET_BYTE(msg, b) ((msg)->data[(b)])
+
 // from cereal.car.CarParams.SafetyModel
 #define SAFETY_SILENT 0U
 #define SAFETY_HONDA_NIDEC 1U
@@ -33,6 +35,7 @@
 #define SAFETY_PSA 31U
 #define SAFETY_RIVIAN 33U
 #define SAFETY_VOLKSWAGEN_MEB 34U
+#define SAFETY_BMW 35U
 
 #define GET_BIT(msg, b) ((bool)!!(((msg)->data[((b) / 8U)] >> ((b) % 8U)) & 0x1U))
 #define GET_FLAG(value, mask) (((__typeof__(mask))(value) & (mask)) == (mask)) // cppcheck-suppress misra-c2012-1.2; allow __typeof__
@@ -342,3 +345,4 @@ extern const safety_hooks volkswagen_mqb_hooks;
 extern const safety_hooks volkswagen_pq_hooks;
 extern const safety_hooks rivian_hooks;
 extern const safety_hooks psa_hooks;
+extern const safety_hooks bmw_hooks;

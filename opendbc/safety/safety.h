@@ -1,10 +1,10 @@
 #pragma once
 
-#include "opendbc/safety/helpers.h"
-#include "opendbc/safety/lateral.h"
-#include "opendbc/safety/longitudinal.h"
-#include "opendbc/safety/safety_declarations.h"
-#include "opendbc/safety/board/can.h"
+#include "helpers.h"
+#include "lateral.h"
+#include "longitudinal.h"
+#include "safety_declarations.h"
+#include "board/can.h"
 
 // all the safety modes
 #include "opendbc/safety/modes/defaults.h"
@@ -25,10 +25,11 @@
 #include "opendbc/safety/modes/elm327.h"
 #include "opendbc/safety/modes/body.h"
 #include "opendbc/safety/modes/psa.h"
+#include "opendbc/safety/modes/bmw.h"
 
 // CAN-FD only safety modes
 #ifdef CANFD
-#include "opendbc/safety/modes/hyundai_canfd.h"
+#include "modes/hyundai_canfd.h"
 #endif
 
 uint32_t GET_BYTES(const CANPacket_t *msg, int start, int len) {
@@ -412,6 +413,7 @@ int set_safety_hooks(uint16_t mode, uint16_t param) {
 #ifdef CANFD
     {SAFETY_HYUNDAI_CANFD, &hyundai_canfd_hooks},
 #endif
+    {SAFETY_BMW, &bmw_hooks},                    // MOVED: No longer debug-only after removing debug prints
 #ifdef ALLOW_DEBUG
     {SAFETY_PSA, &psa_hooks},
     {SAFETY_SUBARU_PREGLOBAL, &subaru_preglobal_hooks},

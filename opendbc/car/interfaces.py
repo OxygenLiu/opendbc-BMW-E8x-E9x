@@ -4,7 +4,7 @@ import time
 import tomllib
 from abc import abstractmethod, ABC
 from enum import StrEnum
-from typing import Any
+from typing import Any, NamedTuple
 from collections.abc import Callable
 from functools import cache
 
@@ -40,6 +40,12 @@ GEAR_SHIFTER_MAP: dict[str, structs.CarState.GearShifter] = {
   'L': GearShifter.low, 'LOW': GearShifter.low,
   'B': GearShifter.brake, 'BRAKE': GearShifter.brake,
 }
+
+class LatControlInputs(NamedTuple):
+  lateral_acceleration: float
+  roll_compensation: float
+  vego: float
+  aego: float
 
 TorqueFromLateralAccelCallbackType = Callable[[float, structs.CarParams.LateralTorqueTuning, bool], float]
 LateralAccelFromTorqueCallbackType = Callable[[float, structs.CarParams.LateralTorqueTuning, bool], float]
