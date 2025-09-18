@@ -130,7 +130,7 @@ class CarInterface(CarInterfaceBase):
     ret.lateralTuning.torque.ki = 0.5 / CarControllerParams.STEER_MAX
     ret.lateralTuning.torque.kf = 5.0 / CarControllerParams.STEER_MAX
 
-    ret.longitudinalActuatorDelay  = 1.0 #s, Gas/Brake actuator delay
+    ret.longitudinalActuatorDelay  = 0.5 #s, Gas/Brake actuator delay (reduced from 1.0s for better responsiveness)
     ret.longitudinalTuning.kpBP = [0.]
     ret.longitudinalTuning.kpV = [.1]
     ret.longitudinalTuning.kiBP = [0.]
