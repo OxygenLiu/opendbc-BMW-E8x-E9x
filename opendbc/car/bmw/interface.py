@@ -37,8 +37,15 @@ class CarInterface(CarInterfaceBase):
   CarState = CarState
   CarController = CarController
 
-  # def __init__(self, CP, CarController, CarState):
-  #   super().__init__(CP, CarController, CarState)
+  def __init__(self, CP, *args, **kwargs):
+    super().__init__(CP, *args, **kwargs)
+
+    # BMW Variable Steer Ratio support
+    # Enable for all BMW E90s based on route analysis showing 30% variation
+    from opendbc.car.bmw.values import CAR
+    self.variable_steer_ratio_enabled = (CP.carFingerprint == CAR.BMW_E90)
+    self.default_steer_ratio = CP.steerRatio  # Store default ratio from CarParams
+
 
   #   self.cp_F = self.CS.get_F_can_parser(CP)
   #   self.can_parsers.append(self.cp_F)
@@ -65,6 +72,84 @@ class CarInterface(CarInterfaceBase):
       return self.get_steer_feedforward_servotronic
     else:
       return self.get_steer_feedforward
+
+
+  def get_variable_steer_ratio(self, steering_angle_deg, speed_ms):
+    """
+    BMW E90 Variable Steer Ratio with linear interpolation, hysteresis, and speed adjustment
+    Based on measured data from route 00000048--891b50d865 (59,629 samples)
+    """
+    abs_angle = abs(steering_angle_deg)
+
+    # Apply simple hysteresis by slightly adjusting the angle for interpolation
+    hysteresis_offset = 1.0  # degrees of smoothing
+
+    # If angle is increasing (turning more), use raw angle
+    # If angle is decreasing (straightening), add slight offset for smoothing
+    if hasattr(self, '_last_abs_angle'):
+        if abs_angle < self._last_abs_angle:  # Angle decreasing
+            smoothed_angle = abs_angle + hysteresis_offset
+        else:  # Angle increasing or same
+            smoothed_angle = abs_angle
+    else:
+        smoothed_angle = abs_angle
+
+    # Store for next iteration
+    self._last_abs_angle = abs_angle
+
+    # Linear interpolation for smooth ratio transitions
+    # Define angle breakpoints and corresponding ratios
+    angle_breakpoints = [0, 10, 45, 90, 180]  # degrees
+    ratio_values = [22.0, 22.0, 21.7, 18.5, 16.8]  # corresponding ratios
+
+    # Use linear interpolation for smooth transitions
+    import numpy as np
+    base_ratio = float(np.interp(smoothed_angle, angle_breakpoints, ratio_values))
+
+    # Speed-dependent adjustment with linear interpolation
+    speed_kph = speed_ms * 3.6
+    speed_breakpoints = [0, 30, 60, 100, 200]  # km/h
+    speed_modifiers = [0.90, 0.90, 0.95, 1.0, 1.05]  # corresponding modifiers
+    speed_modifier = float(np.interp(speed_kph, speed_breakpoints, speed_modifiers))
+
+    # Apply speed modification
+    adjusted_ratio = base_ratio * speed_modifier
+
+    return adjusted_ratio
+
+
+  def get_current_variable_steer_ratio(self):
+    """
+    Get the current speed-dependent variable steer ratio
+    Calculates on-demand to avoid timing issues with update()
+    """
+    if not self.variable_steer_ratio_enabled:
+      return self.default_steer_ratio  # Use CarParams default ratio
+
+    # If we have recent cached data from update(), use it
+    if hasattr(self, '_last_carstate') and self._last_carstate:
+      cs = self._last_carstate
+      # Calculate fresh ratio using cached CarState
+      target_ratio = self.get_variable_steer_ratio(
+        cs['angle'], cs['speed']
+      )
+      return target_ratio
+
+    # Fallback: return default ratio
+    return self.default_steer_ratio
+
+  def update(self, can_packets):
+    """Update CarInterface with CarState caching for on-demand variable steer ratio"""
+    ret = super().update(can_packets)
+
+    # Cache current CarState for on-demand variable steer ratio calculation
+    if self.variable_steer_ratio_enabled:
+      self._last_carstate = {
+        'angle': ret.steeringAngleDeg,
+        'speed': ret.vEgo
+      }
+
+    return ret
 
   @staticmethod
   def _get_params(ret, candidate, fingerprint, car_fw, alpha_long, is_release, docs):
