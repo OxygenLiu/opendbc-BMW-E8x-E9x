@@ -173,15 +173,17 @@ class TestBMWCANParsing:
       # Check that the parser was created successfully (would fail if wrong DBC)
       assert body_parser is not None, f"F-CAN parser creation failed for {car_model}"
 
-      # Verify the parser has the expected F-CAN messages in its value list
-      # These messages only exist in the correct DBC, so this validates the fix
+      # Verify the parser is using the correct DBC file
+      # With empty parser architecture, messages aren't in vl until accessed
+      # So we check the DBC name instead - this directly validates the fix
       if CP.flags & BmwFlags.DYNAMIC_CRUISE_CONTROL:
-        assert hasattr(body_parser, 'vl'), "Parser should have vl attribute"
-        # The parser will have these messages if using correct DBC
-        # If it was using the wrong DBC (PT instead of body), these would be missing
-        expected_fcan_messages = ["CruiseControlStalk", "SteeringWheelAngle_DSC"]
-        for msg in expected_fcan_messages:
-          assert msg in body_parser.vl, f"F-CAN message {msg} missing - parser using wrong DBC!"
+        # The F-CAN parser should use the body DBC, not PT DBC
+        # Check the dbc_name attribute to verify correct DBC is loaded
+        from opendbc.car.bmw.values import DBC
+        expected_dbc_name = DBC[car_model][Bus.body]
+        actual_dbc_name = body_parser.dbc_name
+        assert actual_dbc_name == expected_dbc_name, \
+          f"F-CAN parser using wrong DBC: expected {expected_dbc_name}, got {actual_dbc_name}"
 
   def test_carstate_instantiation(self):
     """Test that CarState can be instantiated for all BMW models"""
