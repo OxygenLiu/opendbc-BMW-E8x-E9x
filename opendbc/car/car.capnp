@@ -233,6 +233,9 @@ struct CarState {
   # BMW diagnostics
   engineCoolantTemp @61 :Float32; # engine coolant temperature in Celsius
   engineOilTemp @62 :Float32;     # engine oil temperature in Celsius
+  bmwDtcCount @63 :UInt16;        # number of active BMW DTCs
+  bmwActiveDtcs @64 :Text;        # active BMW DTC codes (newline-separated)
+  bmwDtcClearStatus @65 :Text;    # DTC clear eligibility status
 
   struct WheelSpeeds {
     # optional wheel speeds

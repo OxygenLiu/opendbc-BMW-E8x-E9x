@@ -867,6 +867,9 @@ BO_ 995 Status_tailgate_CKM: 8 HKL
 BO_ 996 Configuration_rear_view_camera_CKM: 8 CCC
 
 BO_ 1007 EngineOBD_data: 3 DME
+ SG_ OBD_Parameter_ID : 0|8@1+ (1,0) [0|255] "" XXX
+ SG_ OBD_Data_Value : 8|8@1+ (1,0) [0|255] "" XXX
+ SG_ OBD_Status_Flag : 16|8@1+ (1,0) [0|255] "" XXX
 
 BO_ 1152 NetworkManagment1: 8 XXX
 
@@ -883,11 +886,27 @@ BO_ 1246 GWS_ShiftLeverHeartbeat: 8 XXX
 
 BO_ 1408 ServicesKGM: 8 XXX
 
-BO_ 1426 ServicesDME: 8 XXX
+BO_ 1426 ServicesDME: 8 DME
+ SG_ UDS_PCI : 0|8@1+ (1,0) [0|255] "" XXX
+ SG_ UDS_Service_ID : 8|8@1+ (1,0) [0|255] "" XXX
+ SG_ UDS_Data_Byte1 : 16|8@1+ (1,0) [0|255] "" XXX
+ SG_ UDS_Data_Byte2 : 24|8@1+ (1,0) [0|255] "" XXX
+ SG_ UDS_Data_Byte3 : 32|8@1+ (1,0) [0|255] "" XXX
+ SG_ UDS_Data_Byte4 : 40|8@1+ (1,0) [0|255] "" XXX
+ SG_ UDS_Data_Byte5 : 48|8@1+ (1,0) [0|255] "" XXX
+ SG_ UDS_Data_Byte6 : 56|8@1+ (1,0) [0|255] "" XXX
 
 BO_ 1432 ServicesDKG: 8 XXX
 
-BO_ 1449 ServicesDSC: 8 XXX
+BO_ 1449 ServicesDSC: 8 DSC
+ SG_ DSC_Service_PCI : 0|8@1+ (1,0) [0|255] "" XXX
+ SG_ DSC_Service_ID : 8|8@1+ (1,0) [0|255] "" XXX
+ SG_ DSC_Data_Byte1 : 16|8@1+ (1,0) [0|255] "" XXX
+ SG_ DSC_Data_Byte2 : 24|8@1+ (1,0) [0|255] "" XXX
+ SG_ DSC_Data_Byte3 : 32|8@1+ (1,0) [0|255] "" XXX
+ SG_ DSC_Data_Byte4 : 40|8@1+ (1,0) [0|255] "" XXX
+ SG_ DSC_Data_Byte5 : 48|8@1+ (1,0) [0|255] "" XXX
+ SG_ DSC_Data_Byte6 : 56|8@1+ (1,0) [0|255] "" XXX
 
 BO_ 1504 ServicesKOMBI: 8 XXX
 

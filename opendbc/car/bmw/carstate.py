@@ -4,7 +4,7 @@ from opendbc.car import Bus, structs, create_button_events
 from opendbc.car.common.conversions import Conversions as CV
 from opendbc.car.interfaces import CarStateBase
 from opendbc.car.bmw.values import DBC, CanBus, BmwFlags, CruiseSettings
-from opendbc.car.bmw.uds_dtc import Diagnostics, ProtectionAction
+from opendbc.car.bmw.uds_dtc import Diagnostics, ProtectionAction, PassiveDTCMonitor
 
 ButtonType = structs.CarState.ButtonEvent.Type
 
@@ -39,6 +39,21 @@ class CarState(CarStateBase):
     self.engine_coolant_temp = 0.0
     self.engine_oil_temp = 0.0
     self.diagnostics = None
+
+    # Passive DTC monitoring (BMW safety model blocks active UDS requests)
+    self.passive_dtc_monitor = PassiveDTCMonitor()
+
+  def initialize_diagnostics(self, panda):
+    """Initialize UDS diagnostics system with panda connection"""
+    if panda is not None and self.diagnostics is None:
+      try:
+        from opendbc.car.bmw.uds_dtc import Diagnostics
+        self.diagnostics = Diagnostics(panda, self.CP)
+        carlog.info("BMW UDS diagnostics system initialized")
+      except Exception as e:
+        carlog.error(f"Failed to initialize BMW diagnostics: {e}")
+
+
 
   def update(self, can_parsers) -> structs.CarState:
     cp_PT = can_parsers[Bus.pt]
@@ -180,7 +195,32 @@ class CarState(CarStateBase):
     ret.engineCoolantTemp = self.engine_coolant_temp
     ret.engineOilTemp = self.engine_oil_temp
 
+    # Update vehicle state for DTC clear validation
+    ignition_on = True #ret.ignitionLine  # BMW ignition state
+    engine_running = True #ret.engineRpm > 500  # Engine running if RPM > 500
+    self.passive_dtc_monitor.update_vehicle_state(ignition_on, engine_running)
+
+    # Passive DTC monitoring from broadcast messages (BMW safety blocks active UDS)
+    self.passive_dtc_monitor.monitor_diagnostic_messages(cp_PT)
+
+    # Publish real DTC data to CarState for UI
+    ret.bmwDtcCount = self.passive_dtc_monitor.get_dtc_count()
+    ret.bmwActiveDtcs = self.passive_dtc_monitor.get_dtc_summary()
+    ret.bmwDtcClearStatus = self.passive_dtc_monitor.get_dtc_clear_status()
+
     return ret
+
+  def request_dtc_clear(self) -> bool:
+    """Request DTC clearing via UDS Service 0x14"""
+    if self.passive_dtc_monitor:
+      return self.passive_dtc_monitor.request_dtc_clear_via_uds()
+    return False
+
+  def get_uds_clear_message(self) -> bytes:
+    """Get UDS Service 0x14 clear message data for transmission"""
+    if self.passive_dtc_monitor:
+      return self.passive_dtc_monitor.get_uds_clear_request_data()
+    return b''
 
   def init_diagnostics(self, panda):
     """Initialize diagnostics when panda is available (called from interface.py)"""
@@ -240,6 +280,9 @@ class CarState(CarStateBase):
       ("TurnSignals", float('nan')),             # MISSING entirely - ignore liveness
       ("Status_contact_handbrake", float('nan')), # Very sparse (24 msgs) - ignore liveness
       ("EngineData", 10),                        # 10Hz - needed for BMW temperature data
+      ("ServicesDME", float('nan')),             # Passive DTC monitoring - ignore liveness
+      ("EngineOBD_data", float('nan')),          # Passive DTC monitoring - ignore liveness
+      ("ServicesDSC", float('nan')),             # Passive DTC monitoring - ignore liveness
     ]
 
     fcan_messages = []

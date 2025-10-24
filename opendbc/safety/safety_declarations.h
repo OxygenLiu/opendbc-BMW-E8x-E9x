@@ -320,6 +320,10 @@ extern uint16_t current_safety_mode;
 extern uint16_t current_safety_param;
 extern safety_config current_safety_config;
 
+// Panda board state functions for ignition detection
+extern bool ignition_can;
+bool harness_check_ignition(void);
+
 int safety_fwd_hook(int bus_num, int addr);
 int set_safety_hooks(uint16_t mode, uint16_t param);
 

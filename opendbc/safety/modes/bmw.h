@@ -13,9 +13,15 @@ static float interpolate(struct lookup_t xy, float x);
 #define BMW_CruiseControlStalk 0x194U
 #define BMW_TransmissionDataDisplay 0x1D2U
 
-// BMW Stepper Servo CAN Messages 
+// BMW Stepper Servo CAN Messages
 #define STEPPER_STEERING_COMMAND 0x22eU
 #define STEPPER_STEERING_STATUS 0x22fU
+
+// BMW UDS Diagnostic Messages
+#define BMW_UDS_REQUEST_DME 0x7E0U      // UDS request to DME (Engine Control)
+#define BMW_UDS_RESPONSE_DME 0x7E8U     // UDS response from DME
+#define BMW_UDS_FUNCTIONAL_REQUEST 0x7DFU  // UDS functional request
+#define BMW_DIAGNOSTIC_RESPONSE 0x612U  // BMW diagnostic response channel
 
 #define BMW_PT_CAN 0U
 #define BMW_F_CAN 1U
@@ -95,6 +101,24 @@ static void bmw_rx_hook(const CANPacket_t *msg) {
 static bool bmw_tx_hook(const CANPacket_t *msg) {
   int addr = msg->addr;
 
+  // UDS diagnostic request validation - ALLOW even when controls_allowed=false
+  if ((addr == BMW_UDS_REQUEST_DME) || (addr == BMW_UDS_FUNCTIONAL_REQUEST)) {
+    // Check for UDS Service 0x14 (Clear Diagnostic Information)
+    if ((GET_LEN(msg) >= 2) && (msg->data[1] == 0x14U)) {
+      // BMW DTC clearing safety requirement: ignition ON and vehicle stationary
+      // This prevents accidental clearing during driving or when ignition is off
+      bool ignition_on = ignition_can;  // CAN-based ignition detection
+      bool vehicle_safe = !vehicle_moving && (bmw_speed < 1.0f);   // Vehicle stationary
+
+      if (!ignition_on || !vehicle_safe) {
+        return false;  // Block unsafe DTC clear attempts
+      }
+    }
+    // Allow all UDS diagnostic operations (0x14 Clear, 0x19 Read, 0x22 Read Data, etc.)
+    // even when controls_allowed=false (engine OFF scenario)
+    return true;
+  }
+
   const TorqueSteeringLimits STEPPER_SERVO_LIMITS = {
     .max_torque = (12.f / CAN_ACTUATOR_TQ_FAC),     // < 12Nm
     .dynamic_max_torque = true,
@@ -159,6 +183,8 @@ static safety_config bmw_init(uint16_t param) {
     {BMW_CruiseControlStalk, BMW_F_CAN, 4, .check_relay = false}, // Dynamic cruise control send status on F-CAN
     {STEPPER_STEERING_COMMAND, BMW_F_CAN, 5, .check_relay = false}, // STEPPER_SERVO_CAN is allowed on F-CAN network
     {STEPPER_STEERING_COMMAND, BMW_AUX_CAN, 5, .check_relay = false},  // or an standalone network
+    {BMW_UDS_REQUEST_DME, BMW_PT_CAN, 8, .check_relay = false}, // UDS diagnostic requests to DME
+    {BMW_UDS_FUNCTIONAL_REQUEST, BMW_PT_CAN, 8, .check_relay = false}, // UDS functional requests
   };
 
   bmw_speed = 0.0f;

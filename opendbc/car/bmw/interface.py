@@ -210,12 +210,12 @@ class CarInterface(CarInterfaceBase):
     ret.steerLimitTimer = 0.4
 
     CarInterfaceBase.configure_torque_tune(candidate, ret.lateralTuning, steering_angle_deadzone_deg=0.0)
-    # BMW-specific torque tuning overrides
-    ret.lateralTuning.torque.kp = 1.5 / CarControllerParams.STEER_MAX
-    ret.lateralTuning.torque.ki = 0.5 / CarControllerParams.STEER_MAX
-    ret.lateralTuning.torque.kf = 5.0 / CarControllerParams.STEER_MAX
 
-    ret.longitudinalActuatorDelay  = 0.5 #s, Gas/Brake actuator delay (reduced from 1.0s for better responsiveness)
+    ret.lateralTuning.torque.kp = 6.0 / CarControllerParams.STEER_MAX  # 0.5
+    ret.lateralTuning.torque.ki = 3.0 / CarControllerParams.STEER_MAX  # 0.25
+    ret.lateralTuning.torque.kf = 10.0 / CarControllerParams.STEER_MAX  # 0.833
+
+    ret.longitudinalActuatorDelay  = 0.6 #s, Gas/Brake actuator delay (reduced from 1.0s for better responsiveness)
     ret.longitudinalTuning.kpBP = [0.]
     ret.longitudinalTuning.kpV = [.1]
     ret.longitudinalTuning.kiBP = [0.]

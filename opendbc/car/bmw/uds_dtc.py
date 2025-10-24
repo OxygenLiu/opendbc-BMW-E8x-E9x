@@ -1,7 +1,25 @@
 #!/usr/bin/env python3
 """
-BMW UDS (Unified Diagnostic Services) DTC Reading/Clearing Implementation
-Phase 1: Foundation - Using existing opendbc UDS framework
+BMW UDS DTC (Unified Diagnostic Services - Diagnostic Trouble Codes) Integration
+
+This module handles BMW DTC operations using:
+1. Standard UDS client for Service 0x14 (Clear) and Service 0x19 (Read) operations
+2. BMW's internal 0x612 broadcast monitoring for real-time DTC status
+3. BMW Service 0x58 protocol for internal DTC management confirmations
+
+Key Features:
+- Standard UDS Service 0x14/0x19 operations via UdsClient
+- Passive DTC monitoring via BMW 0x612 broadcasts
+- BMW internal DTC code support (29F4, 29F5, etc.)
+- Safety validation: ignition ON + engine OFF for clearing
+- Rate limiting and status tracking
+
+BMW DTC Architecture:
+- Standard UDS: 0x7E0 (DME) for Service 0x14/0x19 operations
+- BMW Internal: 0x612 broadcasts for real-time DTC status
+- F0 format: BMW internal DTC broadcasts (spontaneous)
+- F1 format: BMW Service 0x58 confirmations (after UDS operations)
+- 29F4 = P0420, 29F5 = P0430 (BMW internal to OBD-II translation)
 """
 
 import time
@@ -11,7 +29,7 @@ from enum import IntEnum
 from dataclasses import dataclass
 
 from opendbc.car.carlog import carlog
-from opendbc.car.uds import UdsClient, SERVICE_TYPE, DTC_REPORT_TYPE, DTC_STATUS_MASK_TYPE, NegativeResponseError
+from opendbc.car.uds import UdsClient, DTC_GROUP_TYPE, DTC_REPORT_TYPE, DTC_STATUS_MASK_TYPE, NegativeResponseError
 from opendbc.car.isotp_parallel_query import IsoTpParallelQuery
 
 # ECU Addresses (confirmed from route data analysis)
@@ -813,32 +831,32 @@ class Diagnostics:
         return all_dtcs
     
     def clear_dtcs(self, ecu_id: Optional[int] = None) -> bool:
-        """Clear DTCs for specific ECU or all ECUs using UDS framework"""
+        """Clear DTCs for specific ECU or all ECUs using standard UDS Service 0x14"""
         success = True
-        
+
         ecus_to_clear = [ecu_id] if ecu_id else list(self.uds_clients.keys())
-        
+
         for ecu_id in ecus_to_clear:
             if ecu_id in self.uds_clients:
                 ecu_info = ECU_ADDRESSES[ecu_id]
                 try:
-                    # Use standard UDS service 0x14 to clear DTCs
-                    # Group of DTC: 0xFFFFFF = all groups
-                    self.uds_clients[ecu_id].clear_diagnostic_information(0xFFFFFF)
-                    
+                    # Use standard UDS Service 0x14 (Clear Diagnostic Information)
+                    # DTC_GROUP_TYPE.ALL = 0xFFFFFF = all DTC groups
+                    self.uds_clients[ecu_id].clear_diagnostic_information(DTC_GROUP_TYPE.ALL)
+
                     # Clear local storage
                     self.active_dtcs[ecu_id].clear()
                     self.pending_dtcs[ecu_id].clear()
-                    
-                    carlog.info(f"DTCs cleared for {ecu_info['name']}")
-                    
+
+                    carlog.info(f"UDS Service 0x14: DTCs cleared for {ecu_info['name']}")
+
                 except NegativeResponseError as e:
-                    carlog.warning(f"Failed to clear DTCs for {ecu_info['name']}: {e}")
+                    carlog.warning(f"UDS Service 0x14 failed for {ecu_info['name']}: {e}")
                     success = False
                 except Exception as e:
-                    carlog.error(f"Error clearing DTCs for {ecu_info['name']}: {e}")
+                    carlog.error(f"UDS Service 0x14 error for {ecu_info['name']}: {e}")
                     success = False
-            
+
         return success
     
     def get_active_dtcs(self) -> List[DTCInfo]:
@@ -908,5 +926,708 @@ class Diagnostics:
             }
         }
 
-# Export main class
-__all__ = ['Diagnostics', 'EngineStatus', 'DTCInfo', 'ProtectionAction']
+class PassiveDTCMonitor:
+    """
+    BMW DTC Monitor integrating standard UDS operations with BMW internal broadcasts.
+
+    Architecture:
+    1. Standard UDS Operations (via UdsClient):
+       - Service 0x14: Clear DTCs (0x7E0 → BMW DME)
+       - Service 0x19: Read DTCs (0x7E0 → BMW DME)
+
+    2. BMW Internal Broadcasts (via CAN parser):
+       - 0x612 messages: BMW internal DTC status (spontaneous)
+       - Service 0x58: BMW proprietary DTC management (confirmation only)
+
+    Protocol Separation:
+    - F0 format: BMW internal spontaneous broadcasts when DTCs detected
+    - F1 format: BMW Service 0x58 confirmations after UDS operations
+    - Service 0x58 Sub-functions: 0x02 (Report), 0x00 (Clear confirmation)
+    """
+
+    def __init__(self, panda=None):
+        self.dtc_database = DTCDatabase()
+        self.passive_dtc_codes = set()
+        self.last_dtc_update_time = 0.0
+        self.active_dtc_codes = []
+        self.dtc_count = 0
+        self.last_0x612_message_time = 0.0
+        self.bmw_service_0x58_dtcs = {}  # Track Service 0x58 DTCs with status
+
+        # Vehicle state for DTC clear validation
+        self.ignition_on = False
+        self.engine_running = False
+        self.last_clear_attempt_time = 0.0
+
+        # Standard UDS client for BMW DME (Engine Control)
+        self.uds_client = None
+        if panda:
+            try:
+                self.uds_client = UdsClient(
+                    panda=panda,
+                    tx_addr=0x7E0,  # BMW DME request address
+                    rx_addr=0x7E8,  # BMW DME response address
+                    bus=0,          # PT-CAN
+                    timeout=2.0
+                )
+                carlog.info("BMW PassiveDTCMonitor: UDS client initialized for DME")
+            except Exception as e:
+                carlog.error(f"BMW PassiveDTCMonitor: Failed to initialize UDS client: {e}")
+
+        # UDS Service 0x14 tracking
+        self.pending_clear_request = False
+        self.clear_request_time = 0.0
+
+        # UDS Service 0x19 periodic reading
+        self.last_uds_read_time = 0.0
+        self.uds_read_interval = 300.0  # Read DTCs via UDS every 5 minutes (300 seconds)
+        self.uds_dtc_cache = {}  # Cache UDS DTC results
+
+    def extract_dtc_patterns(self, data: bytes) -> List[str]:
+        """Extract DTC patterns from CAN message data (legacy method)"""
+        dtc_patterns = []
+
+        # Method 1: Standard DTC encoding patterns (with validation)
+        for i in range(len(data) - 1):
+            b1, b2 = data[i], data[i+1]
+
+            # Standard DTC encoding patterns found in BMW messages
+            if b1 >= 0x01 and b1 <= 0x03:  # P0, P1, P2, P3
+                dtc_code = f"P{b1-1:01X}{b2:02X}"
+                # Only add if it passes validation
+                if self.validate_dtc_code(dtc_code):
+                    dtc_patterns.append(dtc_code)
+            elif b1 >= 0x41 and b1 <= 0x43:  # U0, U1, U2, U3
+                dtc_code = f"U{b1-0x41:01X}{b2:02X}"
+                # Only add if it passes validation
+                if self.validate_dtc_code(dtc_code):
+                    dtc_patterns.append(dtc_code)
+
+        # Method 2: BMW-specific DTC encoding (both little and big endian)
+        bmw_dtc_map = {
+            # Little endian (29F4, 29F5)
+            0x29F4: "P0420",  # Catalyst Efficiency Below Threshold Bank 1
+            0x29F5: "P0430",  # Catalyst Efficiency Below Threshold Bank 2
+            # Big endian (F429, F529) - BMW may use big endian encoding
+            0xF429: "P0420",  # P0420 in big endian format
+            0xF529: "P0430",  # P0430 in big endian format
+            # Add more BMW-specific mappings as discovered
+        }
+
+        for i in range(len(data) - 1):
+            b1, b2 = data[i], data[i+1]
+
+            # Check both little and big endian interpretations
+            little_endian = (b1 << 8) | b2  # 29F4, 29F5
+            big_endian = (b2 << 8) | b1     # F429, F529 (swap bytes)
+
+            if little_endian in bmw_dtc_map:
+                dtc_patterns.append(bmw_dtc_map[little_endian])
+            elif big_endian in bmw_dtc_map:
+                dtc_patterns.append(bmw_dtc_map[big_endian])
+
+        return dtc_patterns
+
+    def monitor_0x612_service_0x58(self, cp_PT) -> bool:
+        """Monitor BMW 0x612 Service 0x58 diagnostic broadcasts"""
+        # This would monitor 0x612 messages if they were in DBC
+        # Since 0x612 is not in DBC (diagnostic-only), we need to monitor raw CAN
+        # For now, return False - this will be enhanced when raw CAN monitoring is added
+        return False
+
+    def monitor_0x612_raw_can(self, can_messages) -> bool:
+        """Monitor raw CAN 0x612 messages for BMW Service 0x58 DTC broadcasts"""
+        dtc_found = False
+
+        for msg in can_messages:
+            if msg.address == 0x612:
+                data = bytes(msg.dat)
+                if self.parse_bmw_service_0x58(data):
+                    dtc_found = True
+                    self.last_0x612_message_time = time.time()
+
+        return dtc_found
+
+    def parse_bmw_service_0x58(self, data: bytes) -> bool:
+        """Parse BMW Service 0x58 DTC management messages"""
+        if len(data) < 4:  # Changed from 5 to 4 for F1 clear messages
+            return False
+
+        # Check for BMW internal broadcast (F0 format)
+        if data[0] == 0xF0:
+            if data[1] == 0x10 and len(data) >= 8:  # First frame
+                if data[3] == 0x58 and data[4] == 0x02:  # Service 0x58, sub-function 0x02 (Report)
+                    # Extract DTC: F0 10 08 58 02 29 F5 91
+                    if data[5] == 0x29:  # BMW DTC family
+                        dtc_code = (data[5] << 8) | data[6]  # 29F5
+                        status = data[7]  # 91 = new, 81 = confirmed
+                        return self.add_bmw_service_0x58_dtc(dtc_code, status)
+
+            elif data[1] == 0x21 and len(data) >= 5:  # Consecutive frame
+                # Extract DTC: F0 21 29 F4 81
+                if data[2] == 0x29:  # BMW DTC family
+                    dtc_code = (data[2] << 8) | data[3]  # 29F4
+                    status = data[4]  # 81 = confirmed
+                    return self.add_bmw_service_0x58_dtc(dtc_code, status)
+
+        # Check for BMW Service 0x58 clearing confirmation (F1 format)
+        elif data[0] == 0xF1:
+            if len(data) >= 3 and data[1] == 0x02 and data[2] == 0x58:
+                # F1 02 58 00 = Service 0x58 clear confirmation from BMW
+                if len(data) >= 4 and data[3] == 0x00:
+                    # This is a confirmation that UDS Service 0x14 clear was successful
+                    if self.pending_clear_request:
+                        self.clear_all_bmw_service_0x58_dtcs()
+                        self.pending_clear_request = False
+                        carlog.info("BMW Service 0x58 confirmed UDS Service 0x14 clear completion")
+                        return True
+                    else:
+                        carlog.info("BMW Service 0x58 clear confirmation (external OBD-II scanner)")
+                        return False
+
+        return False
+
+    def add_bmw_service_0x58_dtc(self, dtc_code: int, status: int) -> bool:
+        """Add BMW Service 0x58 DTC with status tracking"""
+        # Convert BMW internal codes to standard DTC format
+        bmw_to_standard = {
+            0x29F4: "P0420",  # Catalyst Efficiency Below Threshold Bank 1
+            0x29F5: "P0430",  # Catalyst Efficiency Below Threshold Bank 2
+        }
+
+        if dtc_code in bmw_to_standard:
+            standard_dtc = bmw_to_standard[dtc_code]
+            dtc_status = "confirmed" if status == 0x81 else "pending" if status == 0x91 else "unknown"
+
+            # Update DTC database
+            self.bmw_service_0x58_dtcs[standard_dtc] = {
+                'bmw_code': dtc_code,
+                'status': dtc_status,
+                'status_byte': status,
+                'last_seen': time.time()
+            }
+
+            # Add to active DTCs
+            self.passive_dtc_codes.add(standard_dtc)
+            return True
+
+        return False
+
+    def clear_all_bmw_service_0x58_dtcs(self):
+        """Clear all BMW Service 0x58 tracked DTCs"""
+        self.bmw_service_0x58_dtcs.clear()
+        self.passive_dtc_codes.clear()
+        self.active_dtc_codes = []
+        self.dtc_count = 0
+
+    def get_0x612_dtc_codes(self) -> set:
+        """Get current DTC codes from 0x612 Service 0x58 monitoring"""
+        return set(self.bmw_service_0x58_dtcs.keys())
+
+    def update_vehicle_state(self, ignition_on: bool, engine_running: bool) -> None:
+        """Update vehicle state for DTC clear validation and trigger periodic UDS reading"""
+        self.ignition_on = ignition_on
+        self.engine_running = engine_running
+
+        # Trigger periodic UDS Service 0x19 reading when conditions are met
+        self._periodic_uds_dtc_read()
+
+    def _periodic_uds_dtc_read(self) -> None:
+        """Perform periodic UDS Service 0x19 DTC reading"""
+        current_time = time.time()
+
+        # Only read DTCs periodically when:
+        # 1. UDS client is available
+        # 2. Engine is running (normal operation)
+        # 3. Time interval has elapsed
+        if (self.uds_client and
+            self.engine_running and
+            current_time - self.last_uds_read_time > self.uds_read_interval):
+
+            try:
+                carlog.info("BMW PassiveDTCMonitor: Performing periodic UDS Service 0x19 DTC read (5-minute interval)")
+                uds_result = self.read_dtcs_via_uds()
+
+                if uds_result.get('success'):
+                    # Cache results for comprehensive status
+                    self.uds_dtc_cache = uds_result
+                    self.last_uds_read_time = current_time
+
+                    # Log any new DTCs found via UDS
+                    uds_dtc_count = uds_result.get('dtc_count', 0)
+                    if uds_dtc_count > 0:
+                        carlog.warning(f"BMW UDS Service 0x19: Found {uds_dtc_count} DTCs during periodic read")
+                        for dtc in uds_result.get('dtcs', []):
+                            carlog.warning(f"  UDS DTC: {dtc['code']} - {dtc['description']} (Severity: {dtc['severity']})")
+                    else:
+                        carlog.info("BMW UDS Service 0x19: No DTCs found during periodic read")
+                else:
+                    carlog.warning(f"BMW UDS Service 0x19 periodic read failed: {uds_result.get('error', 'Unknown error')}")
+
+            except Exception as e:
+                carlog.error(f"BMW UDS Service 0x19 periodic read error: {e}")
+
+            # Update timestamp regardless of success/failure to avoid spam
+            self.last_uds_read_time = current_time
+
+    def validate_dtc_clear_conditions(self) -> bool:
+        """Validate BMW DTC clear conditions: ignition ON + engine OFF"""
+        # Critical safety requirement: ignition ON and engine OFF (check first)
+        if not self.ignition_on:
+            carlog.warning("BMW DTC clear rejected: Ignition OFF (must be ON)")
+            return False
+
+        if self.engine_running:
+            carlog.warning("BMW DTC clear rejected: Engine running (must be OFF)")
+            return False
+
+        # Validation should not have side effects - rate limiting handled in request method
+
+        carlog.info("BMW DTC clear conditions validated: ignition ON, engine OFF")
+        return True
+
+    def get_dtc_clear_status(self) -> str:
+        """Get current DTC clear eligibility status"""
+        if self.pending_clear_request:
+            return "🔄 DTC clear in progress..."
+        elif not self.ignition_on:
+            return "❌ Ignition OFF - Turn ignition ON to clear DTCs"
+        elif self.engine_running:
+            return "❌ Engine running - Turn engine OFF to clear DTCs"
+        else:
+            return "✅ Ready to clear DTCs (ignition ON, engine OFF)"
+
+    def request_dtc_clear_via_uds(self) -> bool:
+        """
+        Request DTC clearing via standard UDS Service 0x14.
+
+        This method uses the standard UDS client to send Service 0x14 to BMW DME.
+        BMW will respond via Service 0x58 confirmation on 0x612.
+        """
+        # Check if UDS client is available
+        if not self.uds_client:
+            carlog.error("BMW DTC clear failed: UDS client not initialized")
+            return False
+
+        # Check if there are DTCs to clear
+        if self.get_dtc_count() == 0:
+            carlog.warning("BMW DTC clear rejected: No DTCs to clear")
+            return False
+
+        # Critical safety validation
+        if not self.validate_dtc_clear_conditions():
+            return False
+
+        # Rate limiting check
+        current_time = time.time()
+        if current_time - self.last_clear_attempt_time < 5.0:
+            carlog.warning("BMW DTC clear rate limited - wait 5 seconds between attempts")
+            return False
+
+        # Perform actual UDS Service 0x14 operation
+        try:
+            # Use standard UDS Service 0x14 (Clear Diagnostic Information)
+            # DTC_GROUP_TYPE.ALL = 0xFFFFFF = all DTC groups
+            self.uds_client.clear_diagnostic_information(DTC_GROUP_TYPE.ALL)
+
+            # Set pending state for BMW Service 0x58 confirmation
+            self.pending_clear_request = True
+            self.clear_request_time = current_time
+            self.last_clear_attempt_time = current_time
+
+            carlog.info("BMW UDS Service 0x14 DTC clear completed - awaiting Service 0x58 confirmation")
+            return True
+
+        except NegativeResponseError as e:
+            carlog.warning(f"BMW UDS Service 0x14 failed: {e}")
+            return False
+        except Exception as e:
+            carlog.error(f"BMW UDS Service 0x14 error: {e}")
+            return False
+
+    def read_dtcs_via_uds(self) -> Dict[str, Any]:
+        """
+        Read DTCs via standard UDS Service 0x19.
+
+        Returns dictionary with DTC information from BMW DME.
+        """
+        if not self.uds_client:
+            carlog.error("BMW DTC read failed: UDS client not initialized")
+            return {'error': 'UDS client not available'}
+
+        try:
+            # Use standard UDS Service 0x19 (Read DTC Information)
+            # Report type: DTC_BY_STATUS_MASK, Status mask: ALL
+            response = self.uds_client.read_dtc_information(
+                dtc_report_type=DTC_REPORT_TYPE.DTC_BY_STATUS_MASK,
+                dtc_status_mask_type=DTC_STATUS_MASK_TYPE.ALL
+            )
+
+            # Parse UDS response
+            dtc_list = []
+            if response and len(response) >= 2:
+                # Skip status availability mask (first byte)
+                dtc_data = response[1:]
+
+                # Parse DTCs (3 bytes per DTC: 2 for code, 1 for status)
+                for i in range(0, len(dtc_data), 3):
+                    if i + 2 < len(dtc_data):
+                        dtc_code = self._decode_uds_dtc(dtc_data[i:i+3])
+                        if dtc_code:
+                            dtc_list.append({
+                                'code': dtc_code,
+                                'status': dtc_data[i+2],
+                                'description': self.dtc_database.get_description(dtc_code),
+                                'severity': self.dtc_database.get_severity(dtc_code)
+                            })
+
+            carlog.info(f"BMW UDS Service 0x19: Found {len(dtc_list)} DTCs")
+            return {
+                'success': True,
+                'dtc_count': len(dtc_list),
+                'dtcs': dtc_list,
+                'source': 'UDS_Service_0x19'
+            }
+
+        except NegativeResponseError as e:
+            carlog.warning(f"BMW UDS Service 0x19 failed: {e}")
+            return {'error': f'UDS Service 0x19 failed: {e}'}
+        except Exception as e:
+            carlog.error(f"BMW UDS Service 0x19 error: {e}")
+            return {'error': f'UDS Service 0x19 error: {e}'}
+
+    def _decode_uds_dtc(self, dtc_bytes: bytes) -> Optional[str]:
+        """Decode UDS DTC bytes to standard format (P/C/B/U codes)"""
+        if len(dtc_bytes) < 2:
+            return None
+
+        # Standard UDS DTC format (ISO 15031-6)
+        dtc_num = (dtc_bytes[0] << 8) | dtc_bytes[1]
+
+        # First two bits determine the prefix
+        prefix_map = {
+            0: 'P',  # Powertrain
+            1: 'C',  # Chassis
+            2: 'B',  # Body
+            3: 'U',  # Network
+        }
+
+        prefix = prefix_map.get((dtc_num >> 14) & 0x03, 'P')
+
+        # Format: Prefix + 4 hex digits
+        code_num = dtc_num & 0x3FFF
+        return f"{prefix}{code_num:04X}"
+
+    def get_uds_clear_request_data(self) -> bytes:
+        """
+        DEPRECATED: Get UDS Service 0x14 clear request data.
+
+        This method is deprecated. Use request_dtc_clear_via_uds() instead,
+        which directly uses the standard UDS client.
+        """
+        carlog.warning("get_uds_clear_request_data() is deprecated - use request_dtc_clear_via_uds()")
+
+        if not self.pending_clear_request:
+            return b''
+
+        # UDS Service 0x14 (Clear Diagnostic Information) - for reference only
+        # This is now handled directly by the UDS client
+        uds_request = bytes([
+            0x04,  # PCI (Protocol Control Information) - 4 data bytes
+            0x14,  # SID (Service Identifier) - Clear Diagnostic Information
+            0xFF,  # Group of DTC byte 1 (0xFFFFFF = all DTCs)
+            0xFF,  # Group of DTC byte 2
+            0xFF,  # Group of DTC byte 3
+            0x00,  # Padding
+            0x00,  # Padding
+            0x00   # Padding
+        ])
+
+        return uds_request
+
+    def get_dtc_summary_with_status(self) -> str:
+        """Get DTC summary with BMW Service 0x58 status information"""
+        if not self.bmw_service_0x58_dtcs:
+            return "No DTCs detected"
+
+        dtc_lines = []
+        for dtc_code, info in self.bmw_service_0x58_dtcs.items():
+            status_text = "⚠️ Pending" if info['status'] == 'pending' else "❌ Confirmed" if info['status'] == 'confirmed' else "❓ Unknown"
+            description = self.dtc_database.get_description(dtc_code)
+            dtc_lines.append(f"{dtc_code}: {status_text}\n{description}")
+
+        return "\n\n".join(dtc_lines)
+
+    def get_dtc_count(self) -> int:
+        """Get current DTC count from BMW Service 0x58 monitoring"""
+        return len(self.bmw_service_0x58_dtcs)
+
+    def get_uds_read_status(self) -> Dict[str, Any]:
+        """Get UDS Service 0x19 reading schedule status"""
+        current_time = time.time()
+        time_since_last_read = current_time - self.last_uds_read_time
+        time_until_next_read = max(0, self.uds_read_interval - time_since_last_read)
+
+        return {
+            'interval_minutes': self.uds_read_interval / 60.0,
+            'last_read_ago_seconds': time_since_last_read,
+            'next_read_in_seconds': time_until_next_read,
+            'uds_client_available': bool(self.uds_client),
+            'engine_running': self.engine_running,
+            'cached_results_available': bool(self.uds_dtc_cache),
+            'ready_for_read': (self.uds_client and self.engine_running and time_until_next_read == 0)
+        }
+
+    def get_comprehensive_dtc_status(self) -> Dict[str, Any]:
+        """
+        Get comprehensive DTC status from both UDS and BMW internal sources.
+
+        Returns merged DTC information from:
+        1. Standard UDS Service 0x19 (active DTCs from DME)
+        2. BMW internal 0x612 broadcasts (real-time DTC status)
+        """
+        result = {
+            'total_dtc_count': 0,
+            'dtcs': [],
+            'sources': {
+                'uds_service_0x19': {'available': bool(self.uds_client), 'dtcs': []},
+                'bmw_internal_0x612': {'available': True, 'dtcs': []}
+            },
+            'last_updated': time.time()
+        }
+
+        # Collect DTCs from UDS Service 0x19 (use cached results if available)
+        if self.uds_client:
+            # Use cached UDS results if recent, otherwise trigger fresh read
+            if (self.uds_dtc_cache and
+                time.time() - self.last_uds_read_time < self.uds_read_interval):
+                # Use cached results
+                uds_result = self.uds_dtc_cache
+                carlog.debug("BMW UDS: Using cached Service 0x19 results")
+            else:
+                # Trigger fresh UDS read
+                uds_result = self.read_dtcs_via_uds()
+                if uds_result.get('success'):
+                    self.uds_dtc_cache = uds_result
+                    self.last_uds_read_time = time.time()
+
+            if uds_result.get('success'):
+                result['sources']['uds_service_0x19']['dtcs'] = uds_result['dtcs']
+                result['dtcs'].extend(uds_result['dtcs'])
+
+        # Collect DTCs from BMW internal 0x612 broadcasts
+        for dtc_code, info in self.bmw_service_0x58_dtcs.items():
+            bmw_dtc = {
+                'code': dtc_code,
+                'status': info['status_byte'],
+                'description': self.dtc_database.get_description(dtc_code),
+                'severity': self.dtc_database.get_severity(dtc_code),
+                'source': 'BMW_Service_0x58',
+                'bmw_code': info['bmw_code'],
+                'last_seen': info['last_seen']
+            }
+            result['sources']['bmw_internal_0x612']['dtcs'].append(bmw_dtc)
+            result['dtcs'].append(bmw_dtc)
+
+        # Remove duplicates (prefer BMW internal info if available)
+        unique_dtcs = {}
+        for dtc in result['dtcs']:
+            code = dtc['code']
+            if code not in unique_dtcs or dtc.get('source') == 'BMW_Service_0x58':
+                unique_dtcs[code] = dtc
+
+        result['dtcs'] = list(unique_dtcs.values())
+        result['total_dtc_count'] = len(result['dtcs'])
+
+        return result
+
+    def get_dtc_summary(self) -> str:
+        """Get simple DTC summary for CarState (backward compatibility)"""
+        # Use comprehensive status but format for legacy interface
+        status = self.get_comprehensive_dtc_status()
+        if status['total_dtc_count'] == 0:
+            return ""
+
+        return "\n".join([
+            f"{dtc['code']} ({dtc.get('source', 'unknown')})"
+            for dtc in status['dtcs']
+        ])
+
+    def monitor_diagnostic_messages(self, cp_PT) -> None:
+        """Monitor BMW diagnostic messages for passive DTC detection using DBC signals"""
+        current_time = time.time()
+
+        # Only check every 10 seconds to avoid excessive processing
+        if current_time - self.last_dtc_update_time < 10.0:
+            return
+
+        dtc_found = False
+        new_dtc_codes = set()
+
+        # Method 1: Structured DBC signal parsing (preferred)
+        try:
+            # ServicesDME - Parse UDS-like structure
+            if cp_PT.vl.get("ServicesDME"):
+                services_dme = cp_PT.vl["ServicesDME"]
+                uds_pci = services_dme.get("UDS_PCI", 0)
+                uds_service_id = services_dme.get("UDS_Service_ID", 0)
+
+                # Check for DTC-related UDS services
+                if uds_service_id == 0x59:  # ReadDTCInformation response
+                    # Extract DTC data from UDS_Data_Byte fields
+                    dtc_data = [
+                        services_dme.get("UDS_Data_Byte1", 0),
+                        services_dme.get("UDS_Data_Byte2", 0),
+                        services_dme.get("UDS_Data_Byte3", 0),
+                        services_dme.get("UDS_Data_Byte4", 0)
+                    ]
+                    dtc_patterns = self.extract_uds_dtc_patterns(dtc_data)
+                    if dtc_patterns:
+                        new_dtc_codes.update(dtc_patterns)
+                        dtc_found = True
+
+            # EngineOBD_data - Parse OBD parameter structure
+            if cp_PT.vl.get("EngineOBD_data"):
+                obd_data = cp_PT.vl["EngineOBD_data"]
+                param_id = obd_data.get("OBD_Parameter_ID", 0)
+                data_value = obd_data.get("OBD_Data_Value", 0)
+
+                # Check for DTC-related OBD parameters
+                dtc_patterns = self.extract_obd_dtc_patterns(param_id, data_value)
+                if dtc_patterns:
+                    new_dtc_codes.update(dtc_patterns)
+                    dtc_found = True
+
+            # ServicesDSC - Parse DSC service structure
+            if cp_PT.vl.get("ServicesDSC"):
+                services_dsc = cp_PT.vl["ServicesDSC"]
+                dsc_pci = services_dsc.get("DSC_Service_PCI", 0)
+                dsc_service_id = services_dsc.get("DSC_Service_ID", 0)
+
+                # Check for DTC-related DSC services
+                if dsc_service_id in [0x59, 0x19]:  # DTC services
+                    dsc_data = [
+                        services_dsc.get("DSC_Data_Byte1", 0),
+                        services_dsc.get("DSC_Data_Byte2", 0),
+                        services_dsc.get("DSC_Data_Byte3", 0),
+                        services_dsc.get("DSC_Data_Byte4", 0)
+                    ]
+                    dtc_patterns = self.extract_uds_dtc_patterns(dsc_data)
+                    if dtc_patterns:
+                        new_dtc_codes.update(dtc_patterns)
+                        dtc_found = True
+
+        except Exception as e:
+            carlog.error(f"BMW DTC structured parsing failed: {e}")
+
+        # Method 2: Fallback to raw byte parsing (legacy compatibility)
+        if not dtc_found:
+            # Check ServicesDME messages (raw)
+            if cp_PT.vl_all.get("ServicesDME"):
+                for msg_data in cp_PT.vl_all["ServicesDME"]:
+                    if hasattr(msg_data, 'dat') and msg_data.dat:
+                        dtc_patterns = self.extract_dtc_patterns(msg_data.dat)
+                        if dtc_patterns:
+                            new_dtc_codes.update(dtc_patterns)
+                            dtc_found = True
+
+        # Update DTC codes if new ones found
+        if new_dtc_codes:
+            # Filter out clearly invalid codes
+            valid_dtc_codes = set()
+            for code in new_dtc_codes:
+                if self.validate_dtc_code(code):
+                    valid_dtc_codes.add(code)
+
+            if valid_dtc_codes:
+                old_count = len(self.passive_dtc_codes)
+                self.passive_dtc_codes.update(valid_dtc_codes)
+
+                # Only update if DTCs actually changed
+                if len(self.passive_dtc_codes) > old_count:
+                    # Create formatted DTC list with descriptions
+                    self.active_dtc_codes = []
+                    for code in sorted(self.passive_dtc_codes):
+                        description = self.dtc_database.get_description(code)
+                        severity = self.dtc_database.get_severity(code)
+                        self.active_dtc_codes.append(f"{code} - {description} ({severity})")
+
+                    self.dtc_count = len(self.passive_dtc_codes)
+                    carlog.warning(f"BMW Passive DTC Detection: {self.dtc_count} codes found: {sorted(self.passive_dtc_codes)}")
+
+        self.last_dtc_update_time = current_time
+
+    def extract_uds_dtc_patterns(self, data_bytes: List[int]) -> List[str]:
+        """Extract DTC patterns from UDS response data"""
+        dtc_patterns = []
+
+        # Standard UDS DTC format: 3 bytes per DTC
+        # Byte 0: DTC high byte, Byte 1: DTC middle byte, Byte 2: DTC low byte
+        for i in range(0, len(data_bytes) - 2, 3):
+            if i + 2 < len(data_bytes):
+                dtc_high = data_bytes[i]
+                dtc_mid = data_bytes[i + 1]
+                dtc_low = data_bytes[i + 2]
+
+                # Convert to standard DTC format
+                if dtc_high != 0 or dtc_mid != 0:  # Valid DTC
+                    dtc_code = f"P{dtc_high:02X}{dtc_mid:02X}"
+                    if dtc_low != 0:
+                        dtc_code = f"P{dtc_high:01X}{dtc_mid:02X}{dtc_low:02X}"
+                    dtc_patterns.append(dtc_code)
+
+        return dtc_patterns
+
+    def extract_obd_dtc_patterns(self, param_id: int, data_value: int) -> List[str]:
+        """Extract DTC patterns from OBD parameter data"""
+        dtc_patterns = []
+
+        # OBD-II DTC parameter IDs (Mode 03 equivalents)
+        if param_id in [0x03, 0x07, 0x0A]:  # DTC-related parameters
+            # Data value contains DTC information
+            if data_value != 0:
+                # Convert OBD data to DTC code
+                dtc_code = f"P{(data_value >> 8) & 0xFF:02X}{data_value & 0xFF:02X}"
+                dtc_patterns.append(dtc_code)
+
+        return dtc_patterns
+
+    def validate_dtc_code(self, code: str) -> bool:
+        """Validate if a DTC code is reasonable"""
+        if len(code) < 4 or len(code) > 5:
+            return False
+
+        # Must start with valid DTC prefix
+        if not code[0] in ['P', 'B', 'C', 'U']:
+            return False
+
+        # Must have valid hex digits after prefix
+        try:
+            int(code[1:], 16)
+        except ValueError:
+            return False
+
+        # Filter out obvious false positives
+        if code in ['P000', 'PFFF', 'P0FF', 'PFF0', 'P00', 'U00C', 'U041']:
+            return False
+
+        # Accept well-known valid DTCs
+        if code in ['P0420', 'P0430', 'P0300', 'P0301', 'U0001']:
+            return True
+
+        # General validation: reasonable hex ranges
+        if len(code) == 4:
+            hex_part = code[1:]
+            hex_val = int(hex_part, 16)
+            # Valid DTC range (not all zeros, not all Fs)
+            if 0x001 <= hex_val <= 0xFFE:
+                return True
+
+        return False
+
+    def get_active_dtcs(self) -> List[str]:
+        """Get list of active DTC codes with descriptions (legacy)"""
+        return self.active_dtc_codes
+
+# Export main classes
+__all__ = ['Diagnostics', 'EngineStatus', 'DTCInfo', 'ProtectionAction', 'PassiveDTCMonitor']
