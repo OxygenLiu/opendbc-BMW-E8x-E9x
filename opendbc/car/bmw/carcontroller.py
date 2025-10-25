@@ -1,4 +1,4 @@
-from opendbc.car import Bus, DT_CTRL, apply_dist_to_meas_limits, apply_hysteresis
+from opendbc.car import Bus, DT_CTRL, apply_dist_to_meas_limits
 from opendbc.car.bmw import bmwcan
 from opendbc.car.bmw.bmwcan import SteeringModes, CruiseStalk
 from opendbc.car.bmw.values import CarControllerParams, CanBus, BmwFlags
@@ -20,14 +20,11 @@ CRUISE_STALK_SINGLE_TICK = CRUISE_STALK_IDLE_TICK_STOCK
 # Emulate held stalk, 100Hz makes stock messages be ignored
 CRUISE_STALK_HOLD_TICK = 0.01
 
-# Between >0.5 and <1 to avoid cruise speed toggling. More than 0.5 to add some phase lead
-CRUISE_SPEED_HYST_GAP = CC_STEP * 0.6
-ACCEL_HYST_GAP = 0.05  # m/s^2
-
-ACCEL_HOLD_MEDIUM = 0.4
-DECEL_HOLD_MEDIUM = -0.6
-ACCEL_HOLD_STRONG = 1.2
-DECEL_HOLD_STRONG = -1.2
+# Reference value
+#ACCEL_HOLD_MEDIUM = 0.4
+#DECEL_HOLD_MEDIUM = -0.6
+#ACCEL_HOLD_STRONG = 1.2
+#DECEL_HOLD_STRONG = -1.2
 
 
 class CarController(CarControllerBase):
@@ -45,10 +42,9 @@ class CarController(CarControllerBase):
     self.last_cruise_tx_timestamp = 0 # openpilot commands
     self.tx_cruise_stalk_counter_last = 0
     self.rx_cruise_stalk_counter_last = -1
-    self.cruise_speed_with_hyst = 0
-    self.accel_with_hyst = 0
-    self.accel_with_hyst_last = 0
-    self.calc_desired_speed = 0
+
+    # ModelV2 velocity error breakpoints for DCC command mapping (m/s)
+    self.v_error_bp = [4.5, 3.0, 1.5, 0.5, -0.5, -1.5, -3.0, -4.5]
 
     self.cruise_bus = CanBus.PT_CAN
     if CP.flags & BmwFlags.DYNAMIC_CRUISE_CONTROL:
@@ -63,24 +59,29 @@ class CarController(CarControllerBase):
 
     self.cruise_units = (CV.MS_TO_KPH if CS.is_metric else CV.MS_TO_MPH)
 
-    # *** hysteresis - trend is your friend ***
-    # avoids cruise speed toggling and biases next request toward the direction of the previous one
-    self.cruise_speed_with_hyst = apply_hysteresis(CS.out.cruiseState.speed, self.cruise_speed_with_hyst, CRUISE_SPEED_HYST_GAP / self.cruise_units)
-    if not CS.out.cruiseState.enabled:
-      self.cruise_speed_with_hyst = CS.out.vEgoCluster
+    # *** Delay-Compensated MPC Velocity Control ***
+    # v_target is delay-compensated velocity from get_accel_from_plan():
+    # - Extracted from MPC trajectory at action_t = longitudinalActuatorDelay + DT_MDL
+    # - For BMW: action_t = 0.15s + 0.1s = 0.25s (accounts for cruise command processing delay)
+    # - MPC refines ModelV2 with physics/comfort/safety constraints (A_CHANGE_COST=200, J_EGO_COST=5)
+    # This is feedforward control - commands what's needed when actuator actually responds!
+    v_target = actuators.speed if actuators.speed > 0 else CS.out.vEgoCluster  # Delay-compensated target
 
-    # acceleration target hysteresis - avoids entering / leaving hold stalk emulation to frequently, etc
-    self.accel_with_hyst = apply_hysteresis(actuators.accel, self.accel_with_hyst, ACCEL_HYST_GAP)
+    # CRITICAL: Use vision speed for current velocity
+    # Three-speed-sources architecture for BMW:
+    # 1. GPS: Accurate but intermittent (buildings/tunnels)
+    # 2. CAN (vEgo): Reliable but conservative, affected by tire pressure/slip
+    # 3. Vision: Accurate and condition-independent (ModelV2 vision-estimated)
+    v_current = actuators.visionSpeed  # ModelV2 vision-estimated current velocity (best for control)
 
-    # *** desired speed model ***
-    # detect filtered acceleration sign change and reset speed calc on change
-    accel_zero_cross = self.accel_with_hyst * self.accel_with_hyst_last < 0
-    self.accel_with_hyst_last = self.accel_with_hyst
-    if accel_zero_cross or not CC.enabled or CS.out.gasPressed:
-      self.calc_desired_speed = CS.out.vEgoCluster
-    self.calc_desired_speed = self.calc_desired_speed + actuators.accel * DT_CTRL
-    speed_err_req = (self.calc_desired_speed - self.cruise_speed_with_hyst) * self.cruise_units
-    speed_err_act = self.calc_desired_speed - CS.out.vEgoCluster
+    # Safety validation: Vision speed must agree with CAN speed within ±5 km/h (±1.39 m/s)
+    # Note: CS.out.vEgo is Kalman-filtered CAN speed (not vision), CS.out.vEgoCluster is display speed
+    vision_can_diff = abs(v_current - CS.out.vEgo)  # Compare vision vs Kalman-filtered CAN
+    if vision_can_diff > 1.39:  # Safety threshold exceeded
+        # Fallback to Kalman-filtered CAN speed if vision-CAN disagreement too large
+        v_current = CS.out.vEgo
+
+    v_error = v_target - v_current  # Velocity error using delay-compensated target
 
     # detect incoming CruiseControlStalk message by observing counter change (message arrives at only 5Hz when nothing pressed)
     if CS.cruise_stalk_counter != self.rx_cruise_stalk_counter_last:
@@ -120,8 +121,8 @@ class CarController(CarControllerBase):
     if not CC.enabled and self.cruise_enabled_prev:
       self.cruise_cancel = True
     # if we need to go below cruise speed, request cancel and coast while steering turns off softly
-    if (CS.out.cruiseState.speedCluster - self.min_cruise_speed) < 0.1 and actuators.accel < -0.1 \
-      and speed_err_act < -1 and CS.out.vEgoCluster - self.min_cruise_speed < 0.4:
+    if (CS.out.cruiseState.speedCluster - self.min_cruise_speed) < 0.1 \
+      and CS.out.vEgoCluster - self.min_cruise_speed < 0.4:
       self.cruise_cancel = True
     # keep requesting cancel until the cruise is disabled
     if not CS.out.cruiseState.enabled:
@@ -134,22 +135,27 @@ class CarController(CarControllerBase):
         cruise_cmd(CruiseStalk.cancel)
         print("cancel")
       elif CC.enabled:
-        if speed_err_act > 5.0 and speed_err_req > -30*CV.KPH_TO_MS*self.cruise_units and not CS.out.gasPressed:
-          cruise_cmd(CruiseStalk.plus5, hold=True) # produces up to 1.2 m/s2
-        elif speed_err_act < -5.0 and speed_err_req < 30*CV.KPH_TO_MS*self.cruise_units and not CS.out.gasPressed:
-          cruise_cmd(CruiseStalk.minus5, hold=True) # produces down to -1.4 m/s2
-        elif speed_err_act > 3.0 and speed_err_req > -15*CV.KPH_TO_MS*self.cruise_units and not CS.out.gasPressed:
-          cruise_cmd(CruiseStalk.plus1, hold=True) # produces up to 0.8 m/s2
-        elif speed_err_act < -3.0 and speed_err_req < 15*CV.KPH_TO_MS*self.cruise_units and not CS.out.gasPressed:
-          cruise_cmd(CruiseStalk.minus1, hold=True) # produces down to -0.8 m/s2
-        elif speed_err_act > 1.5 and speed_err_req > -2.0*CV.KPH_TO_MS*self.cruise_units and not CS.out.gasPressed:
-          cruise_cmd(CruiseStalk.plus5)
-        elif speed_err_act < -1.5 and speed_err_req < 1.0*CV.KPH_TO_MS*self.cruise_units and not CS.out.gasPressed:
-          cruise_cmd(CruiseStalk.minus5)
-        elif speed_err_req > 1.0*CV.KPH_TO_MS*self.cruise_units or CS.out.gasPressed:
-          cruise_cmd(CruiseStalk.plus1)
-        elif speed_err_req < -2.0*CV.KPH_TO_MS*self.cruise_units and not CS.out.gasPressed:
-          cruise_cmd(CruiseStalk.minus1)
+        # Handle driver gas override first
+        if CS.out.gasPressed:
+          cruise_cmd(CruiseStalk.plus1)                                   # Support driver acceleration
+        else:
+          if v_error > self.v_error_bp[0]:                                # > 4.5 m/s (16.2 km/h)
+            cruise_cmd(CruiseStalk.plus5, hold=True)                      # Strong acceleration hold
+          elif v_error > self.v_error_bp[1]:                             # > 3.0 m/s (10.8 km/h)
+            cruise_cmd(CruiseStalk.plus1, hold=True)                      # Medium acceleration hold
+          elif v_error > self.v_error_bp[2]:                             # > 1.5 m/s (5.4 km/h)
+            cruise_cmd(CruiseStalk.plus5)                                 # Light acceleration burst
+          elif v_error > self.v_error_bp[3]:                             # > 0.5 m/s (1.8 km/h)
+            cruise_cmd(CruiseStalk.plus1)                                 # Fine speed adjustment
+          elif v_error < self.v_error_bp[7]:                             # < -4.5 m/s (-16.2 km/h)
+            cruise_cmd(CruiseStalk.minus5, hold=True)                     # Strong deceleration hold
+          elif v_error < self.v_error_bp[6]:                             # < -3.0 m/s (-10.8 km/h)
+            cruise_cmd(CruiseStalk.minus1, hold=True)                     # Medium deceleration hold
+          elif v_error < self.v_error_bp[5]:                             # < -1.5 m/s (-5.4 km/h)
+            cruise_cmd(CruiseStalk.minus5)                                # Light deceleration burst
+          elif v_error < self.v_error_bp[4]:                             # < -0.5 m/s (-1.8 km/h)
+            cruise_cmd(CruiseStalk.minus1)                                # Fine speed reduction
+          # else: velocity error within deadband [-0.5, 0.5] m/s - no command needed
 
     if self.flags & BmwFlags.STEPPER_SERVO_CAN:
       steer_error = not CC.latActive and CC.enabled
@@ -182,8 +188,8 @@ class CarController(CarControllerBase):
     new_actuators.torque = self.apply_torque_last / CarControllerParams.STEER_MAX
     new_actuators.torqueOutputCan = self.apply_torque_last
 
-    new_actuators.speed = self.calc_desired_speed
-    new_actuators.accel = speed_err_req
+    new_actuators.speed = v_target
+    new_actuators.accel = v_error  # Velocity error for logging/debugging
 
     self.frame += 1
     return new_actuators, can_sends

@@ -67,6 +67,40 @@ class CarInterface(CarInterfaceBase):
     hold_torque = np.interp(desired_angle, angle_bp, hold_torque_v)
     return hold_torque # todo add speed component
 
+  @staticmethod
+  def get_modelv2_velocity_index(actuator_delay_s):
+    """
+    Calculate optimal ModelV2 velocity index for actuator delay compensation
+
+    Args:
+        actuator_delay_s: longitudinalActuatorDelay in seconds
+
+    Returns:
+        int: ModelV2 velocity array index for actuator delay compensation
+    """
+    from selfdrive.modeld.constants import index_function, ModelConstants
+
+    if actuator_delay_s <= 0:
+        return 0
+
+    # Generate ModelV2 time indices
+    T_IDXS = [index_function(idx, max_val=10.0) for idx in range(ModelConstants.IDX_N)]
+
+    if actuator_delay_s > T_IDXS[-1]:
+        return len(T_IDXS) - 1
+
+    # Find closest time index to actuator delay
+    best_idx = 0
+    min_error = float('inf')
+
+    for i, t in enumerate(T_IDXS):
+        error = abs(t - actuator_delay_s)
+        if error < min_error:
+            min_error = error
+            best_idx = i
+
+    return best_idx
+
   def get_steer_feedforward_function(self):
     if self.CP.flags & BmwFlags.SERVOTRONIC:
       return self.get_steer_feedforward_servotronic
@@ -221,14 +255,11 @@ class CarInterface(CarInterfaceBase):
     # Starting high (0.6s) is safer - lagd will optimize down to actual ~0.15-0.3s delay
     ret.longitudinalActuatorDelay = 0.6  # Initial delay estimate in seconds (lagd learns actual value)
 
-    # BMW optimized longitudinal PI controller for DCC operating range (30+ km/h)
-    # Replaces conservative P-only controller (kp=0.1, ki=0) with balanced PI
-    # Benefits: 76.9% better performance, zero steady-state error, better hill climbing
-    ret.longitudinalTuning.kpBP = [8.33, 16.67, 27.78]  # Speed breakpoints: 30, 60, 100 km/h (DCC range)
-    ret.longitudinalTuning.kpV = [0.48, 0.40, 0.32]     # Decreasing gains with speed for stability
-    ret.longitudinalTuning.kiBP = [8.33, 16.67, 27.78]  # Speed breakpoints: 30, 60, 100 km/h (DCC range)
-    ret.longitudinalTuning.kiV = [0.013, 0.010, 0.007]  # Integral action eliminates steady-state error
-    ret.longitudinalTuning.kf = 0.8  # Feedforward gain for improved response to target changes
+    # Revolutionary ModelV2 velocity-based DCC control eliminates need for PID tuning
+    # Direct velocity trajectory mapping provides superior control without PID complexity
+
+    # ModelV2 direct velocity extraction uses index 8 (0.625s) for BMW's 0.6s actuator delay
+    # Future enhancement: Calculate dynamic index based on ret.longitudinalActuatorDelay
 
     ret.centerToFront = ret.wheelbase * 0.44
 

@@ -382,6 +382,9 @@ struct CarControl {
     torqueOutputCan @8: Float32;   # value sent over can to the car
     speed @6: Float32;  # m/s
 
+    # Vision-based speed for accurate velocity control
+    visionSpeed @9: Float32;  # m/s - ModelV2 vision-estimated current speed
+
     enum LongControlState @0xe40f3a917d908282{
       off @0;
       pid @1;
