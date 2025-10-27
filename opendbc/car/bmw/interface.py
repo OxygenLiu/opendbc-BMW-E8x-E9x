@@ -249,11 +249,12 @@ class CarInterface(CarInterfaceBase):
     ret.lateralTuning.torque.ki = 3.0 / CarControllerParams.STEER_MAX  # 0.25
     ret.lateralTuning.torque.kf = 10.0 / CarControllerParams.STEER_MAX  # 0.833
 
-    # BMW cruise stalk command processing delay
-    # Initial conservative estimate - lagd will learn actual delay dynamically from driving data
-    # This is used by get_accel_from_plan(action_t = delay + DT_MDL) to extract delay-compensated velocity target
-    # Starting high (0.6s) is safer - lagd will optimize down to actual ~0.15-0.3s delay
-    ret.longitudinalActuatorDelay = 0.6  # Initial delay estimate in seconds (lagd learns actual value)
+    # BMW cruise stalk command processing delay - Two-step tuning strategy:
+    # Phase 1 (current): Fixed 0.6s delay for validating DCC plus/minus mapping logic
+    # Phase 2 (future): Enable lagd.py adaptive learning with stricter quality filtering
+    #                   (only learn when cruise commands actually sent, outside buffer zone)
+    # This delay is used by get_accel_from_plan(action_t = delay + DT_MDL) for velocity extraction
+    ret.longitudinalActuatorDelay = 0.6  # Fixed delay for Phase 1 validation
 
     # Revolutionary ModelV2 velocity-based DCC control eliminates need for PID tuning
     # Direct velocity trajectory mapping provides superior control without PID complexity
