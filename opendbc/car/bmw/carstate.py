@@ -28,6 +28,7 @@ class CarState(CarStateBase):
     self.prev_cruise_stalk_speed = 0
     self.prev_cruise_stalk_resume = self.cruise_stalk_resume
     self.prev_cruise_stalk_cancel = self.cruise_stalk_cancel
+    self.cruise_state_enabled = False  # Track previous cruise state for resume button logic
 
     self.right_blinker_pressed = False
     self.left_blinker_pressed = False
@@ -180,11 +181,13 @@ class CarState(CarStateBase):
       *create_button_events(self.cruise_stalk_cancel, self.prev_cruise_stalk_cancel, {1: ButtonType.cancel}),
       *create_button_events(self.other_buttons, not self.other_buttons, {1: ButtonType.altButton2}),
       *create_button_events(self.cruise_stalk_resume, self.prev_cruise_stalk_resume, {
-        # repurpose resume button to adjust driver personality when engaged, else just resume
-        1: ButtonType.resumeCruise if not ret.cruiseState.enabled else ButtonType.gapAdjustCruise})
+        # Use PREVIOUS cruise state to prevent timing race condition during engagement
+        # When resume pressed: Frame N (not engaged) → resumeCruise, Frame N+1 (engaged) → still resumeCruise ✅
+        # Only on subsequent resume presses when already engaged → gapAdjustCruise
+        1: ButtonType.resumeCruise if not self.cruise_state_enabled else ButtonType.gapAdjustCruise})
       ]
 
-    self.cruise_state_enabled = ret.cruiseState.enabled
+    self.cruise_state_enabled = ret.cruiseState.enabled  # Update for next frame
 
 
     # BMW Engine temperatures from EngineData CAN message (0x1D0)
