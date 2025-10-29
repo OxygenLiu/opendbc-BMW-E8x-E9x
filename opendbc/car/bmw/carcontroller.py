@@ -154,12 +154,12 @@ class CarController(CarControllerBase):
             cruise_cmd(CruiseStalk.plus5)
           elif v_error > 1/3.6 and v_error_setpoint > -5/3.6 and accel > 0.1 and not lead_is_stationary:   # > 1kph, -5kph threshold, accel > 0.1 m/s²
             cruise_cmd(CruiseStalk.plus1)
-          elif v_error < -10/3.6 and v_error_setpoint < 20/3.6 and accel < -0.2: # < -15kph, -30kph threshold, accel < -0.3 m/s²
+          elif v_error < -10/3.6 and v_error_setpoint < 30/3.6 and accel < -0.2: # < -15kph, -30kph threshold, accel < -0.3 m/s²
             cruise_cmd(CruiseStalk.minus5, hold=True)                     # Strong deceleration hold (emergency)
-          elif v_error < -5/3.6 and v_error_setpoint < 10/3.6 and accel < -0.1: # < -8kph, -20kph threshold, accel < -0.2 m/s²
+          elif v_error < -5/3.6 and v_error_setpoint < 15/3.6 and accel < -0.1: # < -8kph, -20kph threshold, accel < -0.2 m/s²
             cruise_cmd(CruiseStalk.minus1, hold=True)                     # Medium deceleration hold (emergency)
-          elif v_error < -1/3.6 and v_error_setpoint < 2/3.6 and accel < -0.1:   # < -1kph, -10kph threshold, accel < -0.1 m/s²
-            cruise_cmd(CruiseStalk.minus5)                                # Fine speed reduction
+          elif v_error < -1/3.6 and v_error_setpoint < 5/3.6 and accel < -0.1:   # < -1kph, -10kph threshold, accel < -0.1 m/s²
+            cruise_cmd(CruiseStalk.minus1)                                # Fine speed reduction
           # else: velocity error within deadband [-0.5, 0.5] m/s - no command needed
 
     if self.flags & BmwFlags.STEPPER_SERVO_CAN:
