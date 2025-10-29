@@ -412,6 +412,8 @@ struct CarControl {
     rightLaneDepart @8: Bool;
     leftLaneDepart @9: Bool;
     leadDistanceBars @10: Int8;  # 1-3: 1 is closest, 3 is farthest. some ports may utilize 2-4 bars instead
+    leadVelocity @11: Float32;   # Lead car absolute velocity (m/s) from radarState.leadOne.vLead
+    leadDistance @12: Float32;   # Lead car relative distance (m) from radarState.leadOne.dRel
 
     # not used with the dash, TODO: separate structs for dash UI and device UI
     audibleAlert @5: AudibleAlert;

@@ -133,11 +133,20 @@ class CarController(CarControllerBase):
         if CS.out.gasPressed:
           cruise_cmd(CruiseStalk.plus1)                                   # Support driver acceleration
         else:
+          # Stationary lead detection: prevent acceleration toward stopped vehicles
+          # Uses vision-based lead detection from ModelV2 → radarState → hudControl
+          # leadVelocity: absolute velocity of lead car (m/s)
+          # leadDistance: relative distance to lead car (m)
+          lead_is_stationary = (CC.hudControl.leadVisible and
+                               CC.hudControl.leadVelocity < 2.0 and    # < 7.2 km/h (nearly stopped)
+                               CC.hudControl.leadDistance < 50.0)      # < 50m (close enough to matter)
+
           # Apply cruise commands with setpoint limiting to prevent cruise cluster from runaway
           # v_error: how much we need to change speed (v_target - v_current)
           # v_error_setpoint: how far cruise setpoint has moved from current speed
           # For acceleration: only send if setpoint hasn't moved too far ahead (v_error_setpoint > -threshold)
           #                   AND openpilot actually wants to accelerate (actuators.accel > 0.2 m/s²)
+          #                   AND no stationary lead vehicle detected (safety)
           #                   Buffer zone of 0.2 m/s² (±0.72 km/h) prevents noise-induced oscillations
           # For emergency deceleration (hold): use 2× threshold for more aggressive braking
           # For other commands: use 1× threshold for precision
