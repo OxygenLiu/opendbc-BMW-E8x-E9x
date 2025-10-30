@@ -232,6 +232,12 @@ class CarInterface(CarInterfaceBase):
     if ret.flags & BmwFlags.NORMAL_CRUISE_CONTROL:
       ret.minEnableSpeed = 30. * CV.KPH_TO_MS
 
+    # BMW longitudinal personality: Speed-dependent T_FOLLOW lookup tables
+    # Low speed: Optimized for 30 kph minEnableSpeed threshold safety
+    # High speed: Compensates for DCC braking limitation (-1.2 m/s²) and vision detection range (~100m)
+    # Lookup tables defined in bmw/values.py with simple interpolation
+    ret.longitudinalPersonalityParams.useCustomLookup = True
+
     ret.safetyConfigs = [get_safety_config(structs.CarParams.SafetyModel.bmw)]
     ret.safetyConfigs[0].safetyParam = 0
 

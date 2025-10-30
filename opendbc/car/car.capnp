@@ -465,6 +465,16 @@ struct CarOutput {
 
 # ****** car param ******
 
+struct LongitudinalPersonalityParams {
+  # Car-specific longitudinal personality following distances
+  # Supports speed-dependent T_FOLLOW for cars with limitations (e.g., BMW DCC)
+  # When enabled, lookup tables in car-specific values.py are used for interpolation
+
+  # Flag to enable custom speed-dependent T_FOLLOW lookup tables
+  # Set to true to use car-specific lookup tables defined in values.py
+  useCustomLookup @0 :Bool;
+}
+
 struct CarParams {
   brand @0 :Text;  # Designates which group a platform falls under. Each folder in opendbc/car is assigned one brand string
   carFingerprint @1 :Text;
@@ -481,6 +491,7 @@ struct CarParams {
   minEnableSpeed @7 :Float32;
   minSteerSpeed @8 :Float32;
   steerAtStandstill @77 :Bool;  # is steering available at standstill? just check if it faults
+  longitudinalPersonalityParams @78 :LongitudinalPersonalityParams;  # Car-specific T_FOLLOW overrides
   safetyConfigs @62 :List(SafetyConfig);
   alternativeExperience @65 :Int16;      # panda flag for features like no disengage on gas
 
