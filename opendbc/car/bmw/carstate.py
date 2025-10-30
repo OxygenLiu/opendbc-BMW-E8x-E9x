@@ -1,10 +1,8 @@
-import time
 from opendbc.can import CANDefine, CANParser
 from opendbc.car import Bus, structs, create_button_events
 from opendbc.car.common.conversions import Conversions as CV
 from opendbc.car.interfaces import CarStateBase
 from opendbc.car.bmw.values import DBC, CanBus, BmwFlags, CruiseSettings
-from opendbc.car.bmw.uds_dtc import Diagnostics, ProtectionAction, PassiveDTCMonitor
 
 ButtonType = structs.CarState.ButtonEvent.Type
 
@@ -28,33 +26,12 @@ class CarState(CarStateBase):
     self.prev_cruise_stalk_speed = 0
     self.prev_cruise_stalk_resume = self.cruise_stalk_resume
     self.prev_cruise_stalk_cancel = self.cruise_stalk_cancel
-    self.cruise_state_enabled = False  # Track previous cruise state for resume button logic
 
     self.right_blinker_pressed = False
     self.left_blinker_pressed = False
     self.other_buttons = False
     self.prev_gas_pressed = False
     self.dtc_mode = False
-
-    # Initialize BMW diagnostics (will be fully initialized with panda later)
-    self.engine_coolant_temp = 0.0
-    self.engine_oil_temp = 0.0
-    self.diagnostics = None
-
-    # Passive DTC monitoring (BMW safety model blocks active UDS requests)
-    self.passive_dtc_monitor = PassiveDTCMonitor()
-
-  def initialize_diagnostics(self, panda):
-    """Initialize UDS diagnostics system with panda connection"""
-    if panda is not None and self.diagnostics is None:
-      try:
-        from opendbc.car.bmw.uds_dtc import Diagnostics
-        self.diagnostics = Diagnostics(panda, self.CP)
-        carlog.info("BMW UDS diagnostics system initialized")
-      except Exception as e:
-        carlog.error(f"Failed to initialize BMW diagnostics: {e}")
-
-
 
   def update(self, can_parsers) -> structs.CarState:
     cp_PT = can_parsers[Bus.pt]
@@ -86,7 +63,7 @@ class CarState(CarStateBase):
     ret.steeringRateDeg = cp_PT.vl["SteeringWheelAngle"]['SteeringSpeed']
     can_gear = int(cp_PT.vl["TransmissionDataDisplay"]['ShiftLeverPosition'])
     ret.gearShifter = self.parse_gear_shifter(self.shifter_values.get(can_gear, None))
-
+    
     # TurnSignals is pre-subscribed with nan frequency, so missing messages won't break can_valid
     # If missing, signals will be 0/default values, which is correct behavior
     blinker_on = cp_PT.vl["TurnSignals"]['TurnSignalActive'] != 0 and cp_PT.vl["TurnSignals"]['TurnSignalIdle'] == 0
@@ -181,90 +158,12 @@ class CarState(CarStateBase):
       *create_button_events(self.cruise_stalk_cancel, self.prev_cruise_stalk_cancel, {1: ButtonType.cancel}),
       *create_button_events(self.other_buttons, not self.other_buttons, {1: ButtonType.altButton2}),
       *create_button_events(self.cruise_stalk_resume, self.prev_cruise_stalk_resume, {
-        # Use PREVIOUS cruise state to prevent timing race condition during engagement
-        # When resume pressed: Frame N (not engaged) → resumeCruise, Frame N+1 (engaged) → still resumeCruise ✅
-        # Only on subsequent resume presses when already engaged → gapAdjustCruise
-        1: ButtonType.resumeCruise if not self.cruise_state_enabled else ButtonType.gapAdjustCruise})
+        # repurpose resume button to adjust driver personality when engaged, else just resume
+        1: ButtonType.resumeCruise if not ret.cruiseState.enabled else ButtonType.gapAdjustCruise})
       ]
 
-    self.cruise_state_enabled = ret.cruiseState.enabled  # Update for next frame
-
-
-    # BMW Engine temperatures from EngineData CAN message (0x1D0)
-    self.engine_coolant_temp = cp_PT.vl['EngineData']['TEMP_ENG']
-    self.engine_oil_temp = cp_PT.vl['EngineData']['TEMP_EOI']
-
-    # BMW diagnostics - publish engine temperatures to CarState for UI
-    ret.engineCoolantTemp = self.engine_coolant_temp
-    ret.engineOilTemp = self.engine_oil_temp
-
-    # Update vehicle state for DTC clear validation
-    ignition_on = True #ret.ignitionLine  # BMW ignition state
-    engine_running = True #ret.engineRpm > 500  # Engine running if RPM > 500
-    self.passive_dtc_monitor.update_vehicle_state(ignition_on, engine_running)
-
-    # Passive DTC monitoring from broadcast messages (BMW safety blocks active UDS)
-    self.passive_dtc_monitor.monitor_diagnostic_messages(cp_PT)
-
-    # Publish real DTC data to CarState for UI
-    ret.bmwDtcCount = self.passive_dtc_monitor.get_dtc_count()
-    ret.bmwActiveDtcs = self.passive_dtc_monitor.get_dtc_summary()
-    ret.bmwDtcClearStatus = self.passive_dtc_monitor.get_dtc_clear_status()
-
+    self.cruise_state_enabled = ret.cruiseState.enabled
     return ret
-
-  def request_dtc_clear(self) -> bool:
-    """Request DTC clearing via UDS Service 0x14"""
-    if self.passive_dtc_monitor:
-      return self.passive_dtc_monitor.request_dtc_clear_via_uds()
-    return False
-
-  def get_uds_clear_message(self) -> bytes:
-    """Get UDS Service 0x14 clear message data for transmission"""
-    if self.passive_dtc_monitor:
-      return self.passive_dtc_monitor.get_uds_clear_request_data()
-    return b''
-
-  def init_diagnostics(self, panda):
-    """Initialize diagnostics when panda is available (called from interface.py)"""
-    try:
-      self.diagnostics = Diagnostics(panda, self.CP)
-      carlog.info("BMW diagnostics initialized - available via VEHICLE button")
-    except Exception as e:
-      carlog.error(f"Failed to initialize BMW diagnostics: {e}")
-
-  def get_diagnostic_data(self):
-    """Get diagnostic data for UI display (called when VEHICLE button pressed)"""
-    if self.diagnostics is None:
-      return {
-        'status': 'unavailable',
-        'message': 'Diagnostics not initialized'
-      }
-
-    try:
-      # Get fresh diagnostic data
-      dtc_summary = self.diagnostics.get_diagnostic_summary()
-      engine_protection = self.diagnostics.get_engine_protection_status()
-
-      return {
-        'status': 'available',
-        'engine_temps': {
-          'coolant': self.engine_coolant_temp,
-          'oil': self.engine_oil_temp
-        },
-        'dtc_summary': dtc_summary,
-        'engine_protection': engine_protection,
-        'actions': {
-          'read_dtcs': lambda: self.diagnostics.request_dtcs(),
-          'clear_dtcs': lambda: self.diagnostics.clear_dtcs()
-        }
-      }
-    except Exception as e:
-      carlog.error(f"Error getting diagnostic data: {e}")
-      return {
-        'status': 'error',
-        'message': str(e)
-      }
 
   # this is only to satisfy non pcmCruise test in test_panda_safety_carstate that requires button_enable
   #
@@ -277,19 +176,15 @@ class CarState(CarStateBase):
   def get_can_parsers(CP):
     # Only pre-subscribe problematic messages that are often completely missing
     # All other messages auto-subscribe dynamically when CarState.update() accesses them
-
+    
     # Use float('nan') for ignore_alive=True on missing/sparse messages
     pt_messages = [
       ("TurnSignals", float('nan')),             # MISSING entirely - ignore liveness
-      ("Status_contact_handbrake", float('nan')), # Very sparse (24 msgs) - ignore liveness
-      ("EngineData", 10),                        # 10Hz - needed for BMW temperature data
-      ("ServicesDME", float('nan')),             # Passive DTC monitoring - ignore liveness
-      ("EngineOBD_data", float('nan')),          # Passive DTC monitoring - ignore liveness
-      ("ServicesDSC", float('nan')),             # Passive DTC monitoring - ignore liveness
+      ("Status_contact_handbrake", float('nan')), # Very sparse (24 msgs) - ignore liveness  
     ]
-
+    
     fcan_messages = []
-
+    
     servo_can_messages = []
 
     return {

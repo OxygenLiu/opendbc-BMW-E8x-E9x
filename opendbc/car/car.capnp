@@ -230,13 +230,6 @@ struct CarState {
   fuelGauge @41 :Float32; # battery or fuel tank level from [0.0, 1.0]
   charging @43 :Bool;
 
-  # BMW diagnostics
-  engineCoolantTemp @61 :Float32; # engine coolant temperature in Celsius
-  engineOilTemp @62 :Float32;     # engine oil temperature in Celsius
-  bmwDtcCount @63 :UInt16;        # number of active BMW DTCs
-  bmwActiveDtcs @64 :Text;        # active BMW DTC codes (newline-separated)
-  bmwDtcClearStatus @65 :Text;    # DTC clear eligibility status
-
   struct WheelSpeeds {
     # optional wheel speeds
     fl @0 :Float32;
