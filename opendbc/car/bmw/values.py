@@ -46,38 +46,16 @@ class CurveSpeedParams:
 
 
 class LongitudinalPersonalityParams:
-  """
-  BMW-specific longitudinal personality scale factors for smooth DCC braking.
-
-  DCC limitations requiring smooth braking approach in critical speed range:
-  1. Can only brake to 30 kph (not full stop) - needs smooth deceleration margin
-  2. DCC minus5 limited to -1.2 m/s² - requires comfortable distance for gradual braking
-  3. Vision detection ~100m - limits effectiveness of scaling above ~60 kph
-
-  Speed-dependent scaling strategy:
-  - Below 50 kph: 1.0× scale (default personality sufficient for safety)
-  - 50-70 kph: Gradual scale increase for smooth, comfortable DCC braking (10m margin)
-  - Above 70 kph: Return to 1.0× scale (vision range becomes limiting factor)
-
-  Critical insight: At speeds above ~60 kph, MPC safe distance exceeds 100m vision range,
-  making T_FOLLOW scaling ineffective for high-speed safety. Focus is on smooth braking
-  in the 55-70 kph range where DCC can comfortably brake to 30 kph threshold.
-
-  Based on smooth braking analysis (10m comfort margin):
-  - 50 kph: 1.0× scale (standard 1.45s) - 13m margin ✓
-  - 60 kph: 1.46× scale (standard 2.12s) - 10m smooth margin ✓
-  - 70 kph: 2.02× scale (standard 2.93s) - 10m smooth margin ✓
-  - 100+ kph: 1.0× scale (vision limited, accept default behavior)
-  """
+  # BMW-specific longitudinal personality scale factors
+  # See docs/BMW_Longitudinal_T_FOLLOW_Tuning.md for detailed configuration options
 
   # Speed breakpoints for T_FOLLOW scale factor (m/s)
-  # Focus on critical 55-70 kph range for smooth stationary approach
-  SPEED_SCALE_BP = [13.9, 16.7, 19.4, 27.8, 38.9]  # 50, 60, 70, 100, 140 kph
+  SPEED_SCALE_BP = [8.3, 13.9, 16.7, 19.4, 22.2, 27.8, 38.9]  # 30, 50, 60, 70, 80, 100, 140 kph
 
-  # Scale factors applied to base personality T_FOLLOW values
-  # Multiplies default openpilot personality (relaxed 1.75s, standard 1.45s, aggressive 1.25s)
-  # Peaks at 70 kph for smooth braking, returns to 1.0× above (vision limited)
-  SPEED_SCALE_VALUES = [1.0, 1.46, 2.02, 1.0, 1.0]
+  # Dual-mode configuration:
+  # - City (30-80 kph): Ultra-aggressive for stationary approach (2.4-2.7s @ 30 kph)
+  # - Highway (80-140 kph): Safe following for 70 kph lead (2-4s @ 70 kph)
+  SPEED_SCALE_VALUES = [0.42, 0.42, 1.29, 1.92, 1.0, 0.42, 0.42]
 
 
 class CanBus:

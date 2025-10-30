@@ -154,9 +154,9 @@ class CarController(CarControllerBase):
             cruise_cmd(CruiseStalk.plus5)
           elif v_error > 1/3.6 and v_error_setpoint > -5/3.6 and accel > 0.1 and not lead_is_stationary:
             cruise_cmd(CruiseStalk.plus1)
-          elif v_error < -10/3.6 and v_error_setpoint < 30/3.6 and accel < 0.0:
+          elif v_error < -12/3.6 and v_error_setpoint < 30/3.6 and accel < 0.0: # Ultra-aggressive: -1.2 m/s2
             cruise_cmd(CruiseStalk.minus5, hold=True)
-          elif v_error < -5/3.6 and v_error_setpoint < 15/3.6 and accel < 0.0:
+          elif v_error < -6/3.6 and v_error_setpoint < 15/3.6 and accel < 0.0: # Responsive: -0.6 m/s2
             cruise_cmd(CruiseStalk.minus1, hold=True)
           elif v_error < -1/3.6 and v_error_setpoint < 5/3.6 and accel < 0.0:
             cruise_cmd(CruiseStalk.minus1)
