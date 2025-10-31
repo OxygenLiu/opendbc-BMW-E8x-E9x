@@ -46,16 +46,18 @@ class CurveSpeedParams:
 
 
 class LongitudinalPersonalityParams:
-  # BMW-specific longitudinal personality scale factors
-  # See docs/BMW_Longitudinal_T_FOLLOW_Tuning.md for detailed configuration options
+  # BMW DCC velocity-difference-based T_FOLLOW scaling
+  # Adjusts following distance based on closing speed to lead vehicle
 
-  # Speed breakpoints for T_FOLLOW scale factor (m/s)
-  SPEED_SCALE_BP = [8.3, 13.9, 16.7, 19.4, 22.2, 27.8, 38.9]  # 30, 50, 60, 70, 80, 100, 140 kph
+  # Velocity difference breakpoints (v_ego - v_lead) in kph
+  VREL_BP_KPH = [0, 10, 20, 30, 40]  # kph
 
-  # Dual-mode configuration:
-  # - City (30-80 kph): Ultra-aggressive for stationary approach (2.4-2.7s @ 30 kph)
-  # - Highway (80-140 kph): Safe following for 70 kph lead (2-4s @ 70 kph)
-  SPEED_SCALE_VALUES = [0.42, 0.42, 1.29, 1.92, 1.0, 0.42, 0.42]
+  # Convert to m/s for runtime interpolation
+  VREL_BP = [v / 3.6 for v in VREL_BP_KPH]  # [0.0, 2.78, 5.56, 8.33, 11.11] m/s
+
+  # T_FOLLOW scale factors (multipliers applied to base T_FOLLOW)
+  # Initial values: 1.0 (no scaling - use default t_follow)
+  T_FOLLOW_SCALE_FACTORS = [1.0, 1.0, 1.0, 1.0, 1.0]
 
 
 class CanBus:
