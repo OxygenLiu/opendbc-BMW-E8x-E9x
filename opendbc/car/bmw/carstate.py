@@ -35,8 +35,8 @@ class CarState(CarStateBase):
     self.prev_gas_pressed = False
     self.dtc_mode = False
 
-    # Subscribe to radarState for velocity-difference-based T_FOLLOW scaling
-    self.sm = messaging.SubMaster(['radarState'])
+    # Subscribe to radarState and liveDelay for velocity-difference-based T_FOLLOW scaling
+    self.sm = messaging.SubMaster(['radarState', 'liveDelay'])
 
   def update(self, can_parsers) -> structs.CarState:
     cp_PT = can_parsers[Bus.pt]
@@ -150,15 +150,22 @@ class CarState(CarStateBase):
     # BMW DCC velocity-difference-based T_FOLLOW scaling
     # BMW has no radar hardware - radarState comes from vision model (ModelV2)
     self.sm.update(0)  # Non-blocking update
-    if self.CP.longitudinalPersonalityParams.useCustomLookup and self.sm['radarState'].leadOne.status:
-      # Calculate velocity difference (vrel = v_ego - v_lead)
-      vrel = ret.vEgo - self.sm['radarState'].leadOne.vLead
-      # Interpolate scale factor from lookup tables
-      ret.longitudinalPersonalitySpeedScale = float(np.interp(vrel,
-                                                              LongitudinalPersonalityParams.VREL_BP,
-                                                              LongitudinalPersonalityParams.T_FOLLOW_SCALE_FACTORS))
+
+    # Apply personalized learned scales if available and lead vehicle detected
+    if (self.sm['liveDelay'].valid and hasattr(self.sm['liveDelay'], 'personalizedScales') and
+        self.CP.longitudinalPersonalityParams.useCustomLookup and self.sm['radarState'].leadOne.status):
+      from cereal import log
+      ld = self.sm['liveDelay']
+      if ld.personalizedStatus == log.LiveDelayData.PersonalizedStatus.learned:
+        learned_scales = list(ld.personalizedScales)
+        if len(learned_scales) == len(LongitudinalPersonalityParams.VREL_BP):
+          # Use learned scales
+          vrel = ret.vEgo - self.sm['radarState'].leadOne.vLead
+          ret.longitudinalPersonalitySpeedScale = float(np.interp(vrel,
+                                                                  LongitudinalPersonalityParams.VREL_BP,
+                                                                  learned_scales))
     else:
-      # No lead vehicle or custom lookup disabled - use default scale
+      # No learned scales or no lead vehicle - use default scale
       ret.longitudinalPersonalitySpeedScale = 1.0
 
     if self.CP.flags & BmwFlags.STEPPER_SERVO_CAN:
