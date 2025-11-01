@@ -152,7 +152,7 @@ class CarState(CarStateBase):
     self.sm.update(0)  # Non-blocking update
 
     # Apply personalized learned scales if available and lead vehicle detected
-    if (self.sm['liveDelay'].valid and hasattr(self.sm['liveDelay'], 'personalizedScales') and
+    if (self.sm.valid['liveDelay'] and hasattr(self.sm['liveDelay'], 'personalizedScales') and
         self.CP.longitudinalPersonalityParams.useCustomLookup and self.sm['radarState'].leadOne.status):
       from cereal import log
       ld = self.sm['liveDelay']
