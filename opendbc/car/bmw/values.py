@@ -48,16 +48,20 @@ class CurveSpeedParams:
 class LongitudinalPersonalityParams:
   # BMW DCC velocity-difference-based T_FOLLOW scaling
   # Adjusts following distance based on closing speed to lead vehicle
+  # Extended to cover both deceleration (positive vrel) and acceleration (negative vrel) phases
 
   # Velocity difference breakpoints (v_ego - v_lead) in kph
-  VREL_BP_KPH = [0, 10, 20, 30, 40]  # kph
+  # Negative vrel: catching up to faster lead (acceleration phase)
+  # Positive vrel: approaching slower lead (deceleration phase)
+  VREL_BP_KPH = [-40, -30, -20, -10, 0, 10, 20, 30, 40]  # kph
 
   # Convert to m/s for runtime interpolation
-  VREL_BP = [v / 3.6 for v in VREL_BP_KPH]  # [0.0, 2.78, 5.56, 8.33, 11.11] m/s
+  VREL_BP = [v / 3.6 for v in VREL_BP_KPH]  # m/s
 
   # T_FOLLOW scale factors (multipliers applied to base T_FOLLOW)
   # Initial values: 1.0 (no scaling - use default t_follow)
-  T_FOLLOW_SCALE_FACTORS = [1.0, 1.0, 1.0, 1.0, 1.0]
+  # Learned values will be updated based on driver behavior in both phases
+  T_FOLLOW_SCALE_FACTORS = [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0]
 
 
 class CanBus:
