@@ -133,6 +133,15 @@ class CarController(CarControllerBase):
         if CS.out.gasPressed:
           cruise_cmd(CruiseStalk.plus1)                                   # Support driver acceleration
         else:
+          # Lead vehicle context for coasting strategy
+          has_close_lead = (CC.hudControl.leadVisible and
+                           CC.hudControl.leadDistance < 100.0)  # < 100m: close enough to require attention
+
+          # Coasting detection: MPC planner wants minimal deceleration
+          is_coasting = (-0.3 < accel < 0.1 and
+                        not CS.out.gasPressed and
+                        not CS.out.brakePressed)
+
           # Stationary lead detection: prevent acceleration toward stopped vehicles
           # Uses vision-based lead detection from ModelV2 → radarState → hudControl
           # leadVelocity: absolute velocity of lead car (m/s)
@@ -141,26 +150,50 @@ class CarController(CarControllerBase):
                                CC.hudControl.leadVelocity < 2.0 and    # < 7.2 km/h (nearly stopped)
                                CC.hudControl.leadDistance < 50.0)      # < 50m (close enough to matter)
 
-          # Apply cruise commands with setpoint limiting to prevent cruise cluster from runaway
+          # Apply cruise commands with lead-aware coasting and setpoint limiting
           # v_error: how much we need to change speed (v_target - v_current)
           # v_error_setpoint: how far cruise setpoint has moved from current speed
-          # For acceleration: only send if setpoint hasn't moved too far ahead (v_error_setpoint > -threshold)
-          #                   AND openpilot actually wants to accelerate (actuators.accel > 0.2 m/s²)
-          #                   AND no stationary lead vehicle detected (safety)
-          #                   Buffer zone of 0.2 m/s² (±0.72 km/h) prevents noise-induced oscillations
-          # For emergency deceleration (hold): use 2× threshold for more aggressive braking
-          # For other commands: use 1× threshold for precision
+          #
+          # ACCELERATION LOGIC:
+          # - Only send if setpoint hasn't moved too far ahead (v_error_setpoint > -threshold)
+          # - AND openpilot actually wants to accelerate (actuators.accel > threshold)
+          # - AND no stationary lead vehicle detected (safety)
+          # - Buffer zone of 0.2 m/s² prevents noise-induced oscillations
+          #
+          # DECELERATION LOGIC (lead-aware coasting):
+          # - Emergency/Responsive: Always use aggressive braking (safety first)
+          # - With close lead: Tight control with -1 km/h deadband (original behavior)
+          # - No lead + coasting: Allow natural decel with -5 km/h deadband
+          # - No lead + active: Moderate control with -2 km/h deadband
+          #
+          # This mimics human behavior: attentive with traffic, relaxed when cruising alone
+          # Natural deceleration values will be tuned from real BMW E90 manual driving data
+
+          # Acceleration commands
           if v_error > 10/3.6 and v_error_setpoint > -5/3.6 and accel > 0.2 and not lead_is_stationary:
             cruise_cmd(CruiseStalk.plus5)
           elif v_error > 1/3.6 and v_error_setpoint > -5/3.6 and accel > 0.1 and not lead_is_stationary:
             cruise_cmd(CruiseStalk.plus1)
-          elif v_error < -12/3.6 and v_error_setpoint < 30/3.6 and accel < 0.0: # Ultra-aggressive: -1.2 m/s2
-            cruise_cmd(CruiseStalk.minus5, hold=True)
-          elif v_error < -6/3.6 and v_error_setpoint < 15/3.6 and accel < 0.0: # Responsive: -0.6 m/s2
-            cruise_cmd(CruiseStalk.minus1, hold=True)
-          elif v_error < -1/3.6 and v_error_setpoint < 5/3.6 and accel < 0.0:
-            cruise_cmd(CruiseStalk.minus1)
-          # else: velocity error within deadband [-1.0 1.0] km/h - no command needed
+
+          # Deceleration commands with lead-aware coasting
+          elif v_error < -12/3.6 and v_error_setpoint < 30/3.6 and accel < 0.0:
+            cruise_cmd(CruiseStalk.minus5, hold=True)  # Ultra-aggressive: -1.2 m/s² (always active)
+          elif v_error < -6/3.6 and v_error_setpoint < 15/3.6 and accel < 0.0:
+            cruise_cmd(CruiseStalk.minus1, hold=True)  # Responsive: -0.6 m/s² (always active)
+          elif has_close_lead:
+            # Following lead: tight control (original -1 km/h deadband for safety)
+            if v_error < -1/3.6 and v_error_setpoint < 5/3.6 and accel < 0.0:
+              cruise_cmd(CruiseStalk.minus1)
+          else:
+            # No lead: allow natural coasting deceleration
+            if is_coasting and v_error > -5/3.6:
+              # Coasting within 5 km/h: let natural engine braking work
+              # Natural decel threshold (-5 km/h) is placeholder - will be tuned from real data
+              pass  # No cruise command - natural deceleration
+            elif v_error < -2/3.6 and v_error_setpoint < 5/3.6 and accel < 0.0:
+              # Beyond coasting threshold: gentle correction with -2 km/h deadband
+              cruise_cmd(CruiseStalk.minus1)
+          # else: velocity error within adaptive deadband - no command needed
 
     if self.flags & BmwFlags.STEPPER_SERVO_CAN:
       steer_error = not CC.latActive and CC.enabled
