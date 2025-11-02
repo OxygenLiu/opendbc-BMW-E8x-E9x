@@ -6,6 +6,12 @@ from opendbc.car.interfaces import CarControllerBase
 from opendbc.can import CANPacker
 from opendbc.car.common.conversions import Conversions as CV
 
+try:
+  from openpilot.common.params import Params
+  PARAMS_AVAILABLE = True
+except ImportError:
+  PARAMS_AVAILABLE = False
+
 
 # DO NOT CHANGE: Cruise control step size
 # Cruise single click jump - always 1 - interpreted as km or miles depending on DSC or DME set units
@@ -34,6 +40,10 @@ class CarController(CarControllerBase):
     self.min_cruise_speed = CP.minEnableSpeed
     self.cruise_units = None
 
+    # DCC Calibration Mode: allows manual DCC testing while logging all CAN data
+    self.params = Params() if PARAMS_AVAILABLE else None
+    self.dcc_calibration_mode = False
+
     self.cruise_cancel = False  # local cruise control cancel
     self.cruise_enabled_prev = False
     # redundant safety check with the board
@@ -53,6 +63,10 @@ class CarController(CarControllerBase):
 
     actuators = CC.actuators
     can_sends = []
+
+    # DCC Calibration Mode: Check param every 100 frames (~1 second at 100Hz)
+    if self.params is not None and (self.frame % 100) == 0:
+      self.dcc_calibration_mode = self.params.get_bool("DccCalibrationMode")
 
     self.cruise_units = (CV.MS_TO_KPH if CS.is_metric else CV.MS_TO_MPH)
 
@@ -124,7 +138,11 @@ class CarController(CarControllerBase):
 
     cruise_stalk_human_pressing = CS.cruise_stalk_resume or CS.cruise_stalk_cancel or CS.cruise_stalk_speed != 0
 
-    if not cruise_stalk_human_pressing and CS.out.cruiseState.enabled:
+    # DCC Calibration Mode: Disable openpilot engagement, allow manual DCC control while logging
+    if self.dcc_calibration_mode:
+      # Skip all openpilot cruise commands, only log CAN data
+      pass
+    elif not cruise_stalk_human_pressing and CS.out.cruiseState.enabled:
       if self.cruise_cancel:
         cruise_cmd(CruiseStalk.cancel)
         print("cancel")
@@ -198,7 +216,12 @@ class CarController(CarControllerBase):
 
     if self.flags & BmwFlags.STEPPER_SERVO_CAN:
       steer_error = not CC.latActive and CC.enabled
-      if not steer_error: # don't send steer CAN tx if steering is unavailable
+      # DCC Calibration Mode: Disable steering control
+      if self.dcc_calibration_mode:
+        apply_torque = 0
+        can_sends.append(bmwcan.create_steer_command(self.frame, SteeringModes.Off))
+        self.apply_torque_last = apply_torque
+      elif not steer_error: # don't send steer CAN tx if steering is unavailable
         # *** apply steering torque ***
         if CC.enabled:
           new_steer = actuators.torque * CarControllerParams.STEER_MAX
