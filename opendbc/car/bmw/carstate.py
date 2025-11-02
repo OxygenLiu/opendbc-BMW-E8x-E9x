@@ -149,24 +149,8 @@ class CarState(CarStateBase):
 
     # BMW DCC velocity-difference-based T_FOLLOW scaling
     # BMW has no radar hardware - radarState comes from vision model (ModelV2)
-    self.sm.update(0)  # Non-blocking update
-
-    # Apply personalized learned scales if available and lead vehicle detected
-    if (self.sm.valid['liveDelay'] and hasattr(self.sm['liveDelay'], 'personalizedScales') and
-        self.CP.longitudinalPersonalityParams.useCustomLookup and self.sm['radarState'].leadOne.status):
-      from cereal import log
-      ld = self.sm['liveDelay']
-      if ld.personalizedStatus == log.LiveDelayData.PersonalizedStatus.learned:
-        learned_scales = list(ld.personalizedScales)
-        if len(learned_scales) == len(LongitudinalPersonalityParams.VREL_BP):
-          # Use learned scales
-          vrel = ret.vEgo - self.sm['radarState'].leadOne.vLead
-          ret.longitudinalPersonalitySpeedScale = float(np.interp(vrel,
-                                                                  LongitudinalPersonalityParams.VREL_BP,
-                                                                  learned_scales))
-    else:
-      # No learned scales or no lead vehicle - use default scale
-      ret.longitudinalPersonalitySpeedScale = 1.0
+    # Learned T_FOLLOW scales are published via liveDelay message and consumed by planner
+    # No need to pass through carState - planner reads liveDelay.personalizedScales directly
 
     if self.CP.flags & BmwFlags.STEPPER_SERVO_CAN:
       ret.steeringTorqueEps = cp_aux.vl['STEERING_STATUS']['STEERING_TORQUE']
