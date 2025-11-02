@@ -138,7 +138,8 @@ class CarController(CarControllerBase):
                            CC.hudControl.leadDistance < 100.0)  # < 100m: close enough to require attention
 
           # Coasting detection: MPC planner wants minimal deceleration
-          is_coasting = (-0.3 < accel < 0.1 and
+          # Based on 87 manual driving segments, captures P5-P95 of actual coasting behavior
+          is_coasting = (-0.72 < accel < 0.29 and
                         not CS.out.gasPressed and
                         not CS.out.brakePressed)
 
@@ -186,9 +187,9 @@ class CarController(CarControllerBase):
               cruise_cmd(CruiseStalk.minus1)
           else:
             # No lead: allow natural coasting deceleration
-            if is_coasting and v_error > -5/3.6:
-              # Coasting within 5 km/h: let natural engine braking work
-              # Natural decel threshold (-5 km/h) is placeholder - will be tuned from real data
+            # Based on 71 Normal mode segments: median -0.285 m/s² × 12s = 12.4 km/h tolerance
+            if is_coasting and v_error > -12.4/3.6:
+              # Coasting within 12.4 km/h: let natural engine braking work (~12 second tolerance)
               pass  # No cruise command - natural deceleration
             elif v_error < -2/3.6 and v_error_setpoint < 5/3.6 and accel < 0.0:
               # Beyond coasting threshold: gentle correction with -2 km/h deadband
