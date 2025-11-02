@@ -216,12 +216,7 @@ class CarController(CarControllerBase):
 
     if self.flags & BmwFlags.STEPPER_SERVO_CAN:
       steer_error = not CC.latActive and CC.enabled
-      # DCC Calibration Mode: Disable steering control
-      if self.dcc_calibration_mode:
-        apply_torque = 0
-        can_sends.append(bmwcan.create_steer_command(self.frame, SteeringModes.Off))
-        self.apply_torque_last = apply_torque
-      elif not steer_error: # don't send steer CAN tx if steering is unavailable
+      if not steer_error: # don't send steer CAN tx if steering is unavailable
         # *** apply steering torque ***
         if CC.enabled:
           new_steer = actuators.torque * CarControllerParams.STEER_MAX
