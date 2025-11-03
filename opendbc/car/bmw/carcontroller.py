@@ -17,10 +17,10 @@ CRUISE_STALK_IDLE_TICK_STOCK = 0.2    # 5Hz - stock idle (no stalk pressed)
 CRUISE_STALK_SINGLE_TICK_STOCK = 0.05 # 20Hz - stock single press
 CRUISE_STALK_HOLD_TICK_STOCK = 0.025  # 40Hz - stock held stalk
 
-# Openpilot DCC Emulation - Match BMW stock frequencies
-# Note: Openpilot only sends CAN messages when adjusting setpoint (no idle emulation)
-CRUISE_STALK_SINGLE_TICK = 0.05  # 20Hz - match stock single press
-CRUISE_STALK_HOLD_TICK = 0.025   # 40Hz - match stock held (prevents setpoint runaway)
+# Openpilot DCC Emulation - Send at controlsd frequency (100Hz)
+# Note: Send commands at 100Hz to match control loop, DCC will rate-limit internally
+CRUISE_STALK_SINGLE_TICK = 0.01  # 100Hz - match controlsd frequency
+CRUISE_STALK_HOLD_TICK = 0.01    # 100Hz - match controlsd frequency (eliminates latency)
 
 # BMW DCC Specifications (ideal/theoretical - see DCC_Methodology_BMW_vs_Openpilot.md)
 # These are BMW's published specs measured to 80-90% of setpoint (transient phase only)
