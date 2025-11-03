@@ -202,8 +202,8 @@ class CarController(CarControllerBase):
 
           # MODE 4: Normal Deceleration (Minus1 held)
           # Entry: v_error < -5 km/h (too fast, need deceleration)
-          # Exit: v_error > -5 km/h (simple threshold, no setpoint override needed)
-          elif v_error < -5/3.6:
+          # Exit: v_error > -5 km/h OR v_error_setpoint > 10 km/h (prevent excessive setpoint drop)
+          elif v_error < -5/3.6 and v_error_setpoint < 10/3.6:
             cruise_cmd(CruiseStalk.minus1, hold=True)  # -0.445 m/s² moderate braking
 
           # MODE 5: Small Deceleration (Minus1 single) - Natural Coasting Simulation
