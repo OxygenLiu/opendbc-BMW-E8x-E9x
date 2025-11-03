@@ -10,21 +10,29 @@ from opendbc.car.common.conversions import Conversions as CV
 # DO NOT CHANGE: Cruise control step size
 # Cruise single click jump - always 1 - interpreted as km or miles depending on DSC or DME set units
 CC_STEP = 1
-# Stock cruise stalk CAN frequency when stalk is not pressed is 5Hz
-CRUISE_STALK_IDLE_TICK_STOCK = 0.2
-# Stock cruise stalk CAN frequency when stalk is pressed is 20Hz
-CRUISE_STALK_HOLD_TICK_STOCK = 0.05
 
-# We will send also at 5Hz in between stock messages to emulate single presses
-CRUISE_STALK_SINGLE_TICK = CRUISE_STALK_IDLE_TICK_STOCK
-# Emulate held stalk, 100Hz makes stock messages be ignored
-CRUISE_STALK_HOLD_TICK = 0.01
+# BMW Stock DCC CAN Frequencies (measured from route 000000f1--7fed5392b6)
+# See: ~/driving_data/docs/dcc_calibration_mode/BMW_DCC_Data.md
+CRUISE_STALK_IDLE_TICK_STOCK = 0.2    # 5Hz - stock idle (no stalk pressed)
+CRUISE_STALK_SINGLE_TICK_STOCK = 0.05 # 20Hz - stock single press
+CRUISE_STALK_HOLD_TICK_STOCK = 0.025  # 40Hz - stock held stalk
 
-# Reference value
-#ACCEL_HOLD_MEDIUM = 0.4
-#DECEL_HOLD_MEDIUM = -0.6
-#ACCEL_HOLD_STRONG = 1.2
-#DECEL_HOLD_STRONG = -1.2
+# Openpilot DCC Emulation - Match BMW stock frequencies
+# Note: Openpilot only sends CAN messages when adjusting setpoint (no idle emulation)
+CRUISE_STALK_SINGLE_TICK = 0.05  # 20Hz - match stock single press
+CRUISE_STALK_HOLD_TICK = 0.025   # 40Hz - match stock held (prevents setpoint runaway)
+
+# BMW DCC Specifications (ideal/theoretical - see DCC_Methodology_BMW_vs_Openpilot.md)
+# These are BMW's published specs measured to 80-90% of setpoint (transient phase only)
+# Plus1 held: 0.4 m/s², Plus5 held: 1.2 m/s²
+# Minus1 held: -0.6 m/s², Minus5 held: -1.2 m/s²
+#
+# Measured Real-World Performance (full settling to 100% of setpoint)
+# Route: 000000f1--7fed5392b6 (71 segments, Normal transmission mode)
+# Plus1 held: 0.208 m/s² (52% of BMW spec - real-world conditions)
+# Minus1 held: -0.445 m/s² (74% of BMW spec)
+# Minus5 held: -0.784 m/s² (65% of BMW spec)
+# Our measurements include complete settling phase, more suitable for velocity control
 
 
 class CarController(CarControllerBase):
@@ -154,50 +162,70 @@ class CarController(CarControllerBase):
                                CC.hudControl.leadVelocity < 2.0 and    # < 7.2 km/h (nearly stopped)
                                CC.hudControl.leadDistance < 50.0)      # < 50m (close enough to matter)
 
-          # Apply cruise commands with lead-aware coasting and setpoint limiting
-          # v_error: how much we need to change speed (v_target - v_current)
-          # v_error_setpoint: how far cruise setpoint has moved from current speed
+          # *** BMW DCC 6-Mode Velocity Control Strategy ***
+          # See: ~/driving_data/docs/dcc_calibration_mode/DCC_Strategy_Complete.md
           #
-          # ACCELERATION LOGIC:
-          # - Only send if setpoint hasn't moved too far ahead (v_error_setpoint > -threshold)
-          # - AND openpilot actually wants to accelerate (actuators.accel > threshold)
-          # - AND no stationary lead vehicle detected (safety)
-          # - Buffer zone of 0.2 m/s² prevents noise-induced oscillations
+          # v_error: velocity error relative to target (v_target - v_current)
+          # v_error_setpoint: velocity error relative to DCC setpoint (v_setpoint - v_current)
           #
-          # DECELERATION LOGIC (lead-aware coasting):
-          # - Emergency/Responsive: Always use aggressive braking (safety first)
-          # - With close lead: Tight control with -1 km/h deadband (original behavior)
-          # - No lead + coasting: Allow natural decel with -5 km/h deadband
-          # - No lead + active: Moderate control with -2 km/h deadband
+          # DUAL ERROR TRACKING:
+          # - v_error: Used for MODE SELECTION (which command to send)
+          # - v_error_setpoint: Used for EXIT CONDITIONS (when to stop sending)
           #
-          # This mimics human behavior: attentive with traffic, relaxed when cruising alone
-          # Natural deceleration values will be tuned from real BMW E90 manual driving data
+          # SETPOINT-BASED OVERSHOOT PREVENTION:
+          # - Acceleration: Exit when setpoint gets within 5 km/h of vEgo (prevent overshoot)
+          # - Emergency braking: Allow setpoint to drop 30 km/h below vEgo (safety priority)
+          #
+          # MEASURED REAL-WORLD PERFORMANCE (route 000000f1--7fed5392b6):
+          # - Plus1 held: 0.208 m/s² (sustained acceleration)
+          # - Minus1 held: -0.445 m/s² (normal deceleration)
+          # - Minus5 held: -0.784 m/s² (emergency braking)
 
-          # Acceleration commands
-          if v_error > 10/3.6 and v_error_setpoint > -5/3.6 and accel > 0.2 and not lead_is_stationary:
-            cruise_cmd(CruiseStalk.plus5)
-          elif v_error > 1/3.6 and v_error_setpoint > -5/3.6 and accel > 0.1 and not lead_is_stationary:
-            cruise_cmd(CruiseStalk.plus1)
+          # MODE 1: Large Acceleration (Plus1 held)
+          # Entry: v_error > 5 km/h (need acceleration)
+          # Exit: v_error_setpoint > -5 km/h (setpoint within 5 km/h of vEgo - prevent overshoot)
+          if v_error > 5/3.6 and v_error_setpoint > -5/3.6 and not lead_is_stationary:
+            cruise_cmd(CruiseStalk.plus1, hold=True)  # 0.208 m/s² sustained acceleration
 
-          # Deceleration commands with lead-aware coasting
-          elif v_error < -12/3.6 and v_error_setpoint < 30/3.6 and accel < 0.0:
-            cruise_cmd(CruiseStalk.minus5, hold=True)  # Ultra-aggressive: -1.2 m/s² (always active)
-          elif v_error < -6/3.6 and v_error_setpoint < 15/3.6 and accel < 0.0:
-            cruise_cmd(CruiseStalk.minus1, hold=True)  # Responsive: -0.6 m/s² (always active)
-          elif has_close_lead:
-            # Following lead: tight control (original -1 km/h deadband for safety)
-            if v_error < -1/3.6 and v_error_setpoint < 5/3.6 and accel < 0.0:
-              cruise_cmd(CruiseStalk.minus1)
-          else:
-            # No lead: allow natural coasting deceleration
+          # MODE 2: Small Acceleration (Plus1 single)
+          # Entry: v_error > 1 km/h (slight acceleration needed)
+          # Multiple single presses for N km/h adjustment
+          elif v_error > 1/3.6 and not lead_is_stationary:
+            cruise_cmd(CruiseStalk.plus1, hold=False)  # Single press at 20Hz
+
+          # MODE 3: Emergency Deceleration (Minus5 held) ⚠️
+          # Entry: v_error < -10 km/h (much too fast - emergency!)
+          # Exit: v_error_setpoint < 30 km/h (allow aggressive setpoint drop for safety)
+          # Safety priority: better to over-brake than under-brake
+          elif v_error < -10/3.6 and v_error_setpoint < 30/3.6:
+            cruise_cmd(CruiseStalk.minus5, hold=True)  # -0.784 m/s² emergency braking
+
+          # MODE 4: Normal Deceleration (Minus1 held)
+          # Entry: v_error < -5 km/h (too fast, need deceleration)
+          # Exit: v_error > -5 km/h (simple threshold, no setpoint override needed)
+          elif v_error < -5/3.6:
+            cruise_cmd(CruiseStalk.minus1, hold=True)  # -0.445 m/s² moderate braking
+
+          # MODE 5: Small Deceleration (Minus1 single) - Natural Coasting Simulation
+          # Entry: v_error < -1 km/h (slightly too fast)
+          # Strategy: Simulate natural deceleration when coasting with lead, preserve brake pads
+          elif has_close_lead and is_coasting and v_error > -12.4/3.6:
+            # Following lead + coasting: simulate natural deceleration by tracking vEgo down
+            # Send consecutive Minus1 to reduce DCC setpoint, mimicking engine brake + rolling resistance
             # Based on 71 Normal mode segments: median -0.285 m/s² × 12s = 12.4 km/h tolerance
-            if is_coasting and v_error > -12.4/3.6:
-              # Coasting within 12.4 km/h: let natural engine braking work (~12 second tolerance)
-              pass  # No cruise command - natural deceleration
-            elif v_error < -2/3.6 and v_error_setpoint < 5/3.6 and accel < 0.0:
-              # Beyond coasting threshold: gentle correction with -2 km/h deadband
-              cruise_cmd(CruiseStalk.minus1)
-          # else: velocity error within adaptive deadband - no command needed
+            # Benefit: No actual braking needed → preserves brake pads!
+            # CRITICAL: v_error_setpoint < 1 km/h (very tight) to avoid DCC triggering brakes
+            if v_error < -1/3.6 and v_error_setpoint < 1/3.6:
+              cruise_cmd(CruiseStalk.minus1, hold=False)  # Single press at 20Hz, track vEgo down
+
+          # Standard small deceleration (no lead, or beyond coasting threshold)
+          elif v_error < -1/3.6 and v_error_setpoint < 5/3.6 and accel < 0.0:
+            cruise_cmd(CruiseStalk.minus1, hold=False)  # Single press at 20Hz
+
+          # MODE 6: Deadband (Coast)
+          # ±1 km/h tolerance - no commands sent
+          # Prevents oscillation, allows natural speed variations
+          # else: pass
 
     if self.flags & BmwFlags.STEPPER_SERVO_CAN:
       steer_error = not CC.latActive and CC.enabled
