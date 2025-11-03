@@ -201,9 +201,9 @@ class CarController(CarControllerBase):
             cruise_cmd(CruiseStalk.minus5, hold=True)  # -0.784 m/s² emergency braking
 
           # MODE 4: Normal Deceleration (Minus1 held)
-          # Entry: v_error < -5 km/h (too fast, need deceleration)
+          # Entry: v_error < -5 km/h AND MPC wants deceleration
           # Exit: v_error > -5 km/h OR v_error_setpoint > 10 km/h (prevent excessive setpoint drop)
-          elif v_error < -5/3.6 and v_error_setpoint < 10/3.6:
+          elif v_error < -5/3.6 and v_error_setpoint < 10/3.6 and accel < 0.0:
             cruise_cmd(CruiseStalk.minus1, hold=True)  # -0.445 m/s² moderate braking
 
           # MODE 5: Small Deceleration (Minus1 single) - Natural Coasting Simulation
@@ -215,8 +215,9 @@ class CarController(CarControllerBase):
             # Based on 71 Normal mode segments: median -0.285 m/s² × 12s = 12.4 km/h tolerance
             # Benefit: No actual braking needed → preserves brake pads!
             # CRITICAL: v_error_setpoint < 1 km/h (very tight) to avoid DCC triggering brakes
-            if v_error < -1/3.6 and v_error_setpoint < 1/3.6:
-              cruise_cmd(CruiseStalk.minus1, hold=False)  # Single press at 20Hz, track vEgo down
+            # AND accel < 0 to respect MPC intent (avoid fighting on downhill/slight acceleration)
+            if v_error < -1/3.6 and v_error_setpoint < 1/3.6 and accel < 0.0:
+              cruise_cmd(CruiseStalk.minus1, hold=False)  # Single press at 100Hz, track vEgo down
 
           # Standard small deceleration (no lead, or beyond coasting threshold)
           elif v_error < -1/3.6 and v_error_setpoint < 5/3.6 and accel < 0.0:
