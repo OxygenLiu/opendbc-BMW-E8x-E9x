@@ -78,9 +78,10 @@ class CarController(CarControllerBase):
 
     v_error = v_target - v_current  # Velocity error using delay-compensated target
 
-    # Cruise setpoint error: tracks how far cruise cluster setpoint has moved from current speed
-    # Add 2 km/h offset to account for display rounding and prevent oscillation
-    v_error_setpoint = v_current + (2.0 / 3.6) - CS.out.cruiseState.speedCluster
+    # Cruise setpoint error: direct difference for runaway protection
+    # Positive = v_ego > setpoint (going too fast), Negative = v_ego < setpoint (going too slow)
+    # Use raw DCC setpoint from CAN (CruiseControlSetpointSpeed), not cluster display value
+    v_error_setpoint = v_current - CS.out.cruiseState.speed
 
     # Acceleration command from planner - used for intent confirmation in cruise control
     accel = actuators.accel
