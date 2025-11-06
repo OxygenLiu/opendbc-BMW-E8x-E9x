@@ -145,24 +145,6 @@ class CarController(CarControllerBase):
         if CS.out.gasPressed:
           cruise_cmd(CruiseStalk.plus1)                                   # Support driver acceleration
         else:
-          # Lead vehicle context for coasting strategy
-          has_close_lead = (CC.hudControl.leadVisible and
-                           CC.hudControl.leadDistance < 100.0)  # < 100m: close enough to require attention
-
-          # Coasting detection: MPC planner wants minimal deceleration
-          # Based on 87 manual driving segments, captures P5-P95 of actual coasting behavior
-          is_coasting = (-0.72 < accel < 0.29 and
-                        not CS.out.gasPressed and
-                        not CS.out.brakePressed)
-
-          # Stationary lead detection: prevent acceleration toward stopped vehicles
-          # Uses vision-based lead detection from ModelV2 → radarState → hudControl
-          # leadVelocity: absolute velocity of lead car (m/s)
-          # leadDistance: relative distance to lead car (m)
-          lead_is_stationary = (CC.hudControl.leadVisible and
-                               CC.hudControl.leadVelocity < 2.0 and    # < 7.2 km/h (nearly stopped)
-                               CC.hudControl.leadDistance < 50.0)      # < 50m (close enough to matter)
-
           # *** BMW DCC 6-Mode Velocity Control Strategy ***
           # See: ~/driving_data/docs/dcc_calibration_mode/DCC_Strategy_Complete.md
           #
@@ -185,13 +167,13 @@ class CarController(CarControllerBase):
           # MODE 1: Large Acceleration (Plus1 held)
           # Entry: v_error > 5 km/h (need acceleration)
           # Exit: v_error_setpoint > -5 km/h (setpoint within 5 km/h of vEgo - prevent overshoot)
-          if v_error > 5/3.6 and v_error_setpoint > -5/3.6 and not lead_is_stationary:
+          if v_error > 5/3.6 and v_error_setpoint > -5/3.6:
             cruise_cmd(CruiseStalk.plus1, hold=True)  # 0.208 m/s² sustained acceleration
 
           # MODE 2: Small Acceleration (Plus1 single)
           # Entry: v_error > 1 km/h (slight acceleration needed)
           # Multiple single presses for N km/h adjustment
-          elif v_error > 1/3.6 and not lead_is_stationary:
+          elif v_error > 1/3.6:
             cruise_cmd(CruiseStalk.plus1, hold=False)  # Single press at 20Hz
 
           # MODE 3: Emergency Deceleration (Minus5 held) ⚠️
@@ -207,20 +189,9 @@ class CarController(CarControllerBase):
           elif v_error < -5/3.6 and v_error_setpoint < 10/3.6 and accel < 0.0:
             cruise_cmd(CruiseStalk.minus1, hold=True)  # -0.445 m/s² moderate braking
 
-          # MODE 5: Small Deceleration (Minus1 single) - Natural Coasting Simulation
-          # Entry: v_error < -1 km/h (slightly too fast)
-          # Strategy: Simulate natural deceleration when coasting with lead, preserve brake pads
-          elif has_close_lead and is_coasting and v_error > -12.4/3.6:
-            # Following lead + coasting: simulate natural deceleration by tracking vEgo down
-            # Send consecutive Minus1 to reduce DCC setpoint, mimicking engine brake + rolling resistance
-            # Based on 71 Normal mode segments: median -0.285 m/s² × 12s = 12.4 km/h tolerance
-            # Benefit: No actual braking needed → preserves brake pads!
-            # CRITICAL: v_error_setpoint < 1 km/h (very tight) to avoid DCC triggering brakes
-            # AND accel < 0 to respect MPC intent (avoid fighting on downhill/slight acceleration)
-            if v_error < -1/3.6 and v_error_setpoint < 1/3.6 and accel < 0.0:
-              cruise_cmd(CruiseStalk.minus1, hold=False)  # Single press at 100Hz, track vEgo down
-
-          # Standard small deceleration (no lead, or beyond coasting threshold)
+          # MODE 5: Small Deceleration (Minus1 single)
+          # Entry: v_error < -1 km/h (slightly too fast) AND MPC wants deceleration
+          # Exit: v_error_setpoint > 5 km/h (prevent excessive setpoint drop)
           elif v_error < -1/3.6 and v_error_setpoint < 5/3.6 and accel < 0.0:
             cruise_cmd(CruiseStalk.minus1, hold=False)  # Single press at 20Hz
 
