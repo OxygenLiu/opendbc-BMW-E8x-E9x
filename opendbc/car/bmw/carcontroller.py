@@ -17,10 +17,12 @@ CRUISE_STALK_IDLE_TICK_STOCK = 0.2    # 5Hz - stock idle (no stalk pressed)
 CRUISE_STALK_SINGLE_TICK_STOCK = 0.05 # 20Hz - stock single press
 CRUISE_STALK_HOLD_TICK_STOCK = 0.025  # 40Hz - stock held stalk
 
-# Openpilot DCC Emulation - Send at controlsd frequency (100Hz)
-# Note: Send commands at 100Hz to match control loop, DCC will rate-limit internally
-CRUISE_STALK_SINGLE_TICK = 0.01  # 100Hz - match controlsd frequency
-CRUISE_STALK_HOLD_TICK = 0.01    # 100Hz - match controlsd frequency (eliminates latency)
+# Openpilot DCC Emulation - Frequency-based command rates
+# Different modes use different frequencies for comfort and responsiveness
+CRUISE_STALK_PLUS1_SINGLE_TICK = 0.05   # 20Hz - gentle acceleration (single presses)
+CRUISE_STALK_MINUS5_HOLD_TICK = 0.01    # 100Hz - emergency braking (maximum rate)
+CRUISE_STALK_MINUS1_HOLD_TICK = 0.025   # 40Hz - moderate braking (held)
+CRUISE_STALK_MINUS1_SINGLE_TICK = 0.05  # 20Hz - cruise adjustment (single presses)
 
 # BMW DCC Specifications (ideal/theoretical - see DCC_Methodology_BMW_vs_Openpilot.md)
 # These are BMW's published specs measured to 80-90% of setpoint (transient phase only)
@@ -94,17 +96,13 @@ class CarController(CarControllerBase):
     self.rx_cruise_stalk_counter_last = CS.cruise_stalk_counter
 
     # *** send cruise control stalk message at different rates and manage counters ***
-    def cruise_cmd(cmd, hold=False):
+    def cruise_cmd(cmd, tick_interval):
       time_since_cruise_sent = (now_nanos - self.last_cruise_tx_timestamp) / 1e9 + DT_CTRL / 10 # add half task sample time to account for latency
       time_since_cruise_received = (now_nanos - self.last_cruise_rx_timestamp) / 1e9 + DT_CTRL / 10 # add half task sample time to account for latency
-      # send single cmd with an effective rate slower than held stalk rate
-      if not hold:
-        send = time_since_cruise_sent > CRUISE_STALK_SINGLE_TICK \
-          and time_since_cruise_received > CRUISE_STALK_HOLD_TICK_STOCK/2 - DT_CTRL \
-          and time_since_cruise_received < CRUISE_STALK_IDLE_TICK_STOCK/2 + DT_CTRL
-      else:
-        # use faster rate to emulate held stalk. Time first message such that subsequent one will nullify stock message:
-        send = hold and time_since_cruise_sent > CRUISE_STALK_HOLD_TICK
+      # Check if enough time has passed to send the next command
+      send = time_since_cruise_sent > tick_interval \
+        and time_since_cruise_received > CRUISE_STALK_HOLD_TICK_STOCK/2 - DT_CTRL \
+        and time_since_cruise_received < CRUISE_STALK_IDLE_TICK_STOCK/2 + DT_CTRL
       if send:
         tx_cruise_stalk_counter = self.tx_cruise_stalk_counter_last + 1
         # avoid counter clash with a potential upcoming message from stock cruise
@@ -138,60 +136,63 @@ class CarController(CarControllerBase):
     # The check here is defensive programming - CC.enabled should already be False
     if not cruise_stalk_human_pressing and CS.out.cruiseState.enabled:
       if self.cruise_cancel:
-        cruise_cmd(CruiseStalk.cancel)
+        cruise_cmd(CruiseStalk.cancel, CRUISE_STALK_SINGLE_TICK_STOCK)  # Use stock single press rate for cancel
         print("cancel")
       elif CC.enabled:
         # Handle driver gas override first
         if CS.out.gasPressed:
-          cruise_cmd(CruiseStalk.plus1)                                   # Support driver acceleration
+          cruise_cmd(CruiseStalk.plus1, CRUISE_STALK_PLUS1_SINGLE_TICK)  # Support driver acceleration
         else:
           # *** BMW DCC 5-Mode Velocity Control Strategy ***
-          # See: ~/driving_data/docs/dcc_calibration_mode/DCC_Strategy_Complete.md
+          # Frequency-optimized braking modes with MPC accel-based thresholds
           #
           # v_error: velocity error relative to target (v_target - v_current)
           # v_error_setpoint: velocity error relative to DCC setpoint (v_setpoint - v_current)
+          # accel: MPC acceleration command (m/s²) - used for mode selection
           #
           # DUAL ERROR TRACKING:
           # - v_error: Used for MODE SELECTION (which command to send)
           # - v_error_setpoint: Used for EXIT CONDITIONS (when to stop sending)
           #
-          # SETPOINT-BASED OVERSHOOT PREVENTION:
-          # - Acceleration: Exit when setpoint gets within 5 km/h of vEgo (prevent overshoot)
-          # - Emergency braking: Allow setpoint to drop 30 km/h below vEgo (safety priority)
+          # FREQUENCY-BASED BRAKING:
+          # - Emergency: 100Hz (minus5 held) - maximum responsiveness
+          # - Moderate: 40Hz (minus1 held) - balanced comfort/response
+          # - Cruise: 20Hz (minus1 single) - gentle adjustments
           #
           # MEASURED REAL-WORLD PERFORMANCE (route 000000f1--7fed5392b6):
-          # - Plus1 single: Gentle acceleration (multiple presses accumulate)
-          # - Minus1 held: -0.445 m/s² (normal deceleration)
-          # - Minus5 held: -0.784 m/s² (emergency braking)
+          # - Plus1 single (20Hz): Gentle acceleration (multiple presses accumulate)
+          # - Minus1 held (40Hz): -0.445 m/s² (moderate deceleration)
+          # - Minus5 held (100Hz): -0.784 m/s² (emergency braking)
 
-          # MODE 1: Acceleration (Plus1 single)
-          # Entry: v_error > 1.5 km/h (need acceleration) AND MPC wants acceleration
+          # MODE 1: Acceleration (Plus1 single @ 20Hz)
+          # Entry: v_error > 1.5 km/h AND MPC wants acceleration (accel > 0)
           # Exit: v_error_setpoint > -5 km/h (setpoint within 5 km/h of vEgo - prevent overshoot)
           # Multiple single presses accumulate to reach target speed (comfortable, not aggressive)
           if v_error > 1.5/3.6 and v_error_setpoint > -5/3.6 and accel > 0:
-            cruise_cmd(CruiseStalk.plus1, hold=False)  # Single press at 20Hz
+            cruise_cmd(CruiseStalk.plus1, CRUISE_STALK_PLUS1_SINGLE_TICK)
 
-          # MODE 2: Emergency Deceleration (Minus5 held) ⚠️
-          # Entry: v_error < -10 km/h (much too fast - emergency!)
-          # Exit: v_error_setpoint < 30 km/h (allow aggressive setpoint drop for safety)
-          # Safety priority: better to over-brake than under-brake
-          elif v_error < -10/3.6 and v_error_setpoint < 30/3.6:
-            cruise_cmd(CruiseStalk.minus5, hold=True)  # -0.784 m/s² emergency braking
+          # MODE 2: Emergency Deceleration (Minus5 held @ 100Hz) ⚠️
+          # Entry: v_error < -2 km/h AND strong MPC deceleration (accel < -1.0 m/s²)
+          # Maximum frequency for fastest response in emergency situations
+          elif v_error < -2/3.6 and accel < -1.0:
+            cruise_cmd(CruiseStalk.minus5, CRUISE_STALK_MINUS5_HOLD_TICK)
 
-          # MODE 3: Normal Deceleration (Minus1 held)
-          # Entry: v_error < -5 km/h AND MPC wants deceleration
-          # Exit: v_error > -5 km/h OR v_error_setpoint > 10 km/h (prevent excessive setpoint drop)
-          elif v_error < -5/3.6 and v_error_setpoint < 10/3.6 and accel < 0.0:
-            cruise_cmd(CruiseStalk.minus1, hold=True)  # -0.445 m/s² moderate braking
+          # MODE 3: Moderate Deceleration (Minus1 held @ 40Hz)
+          # Entry: v_error < -2 km/h AND moderate MPC deceleration (accel < -0.4 m/s²)
+          # Exit: v_error_setpoint < 15 km/h (prevent excessive setpoint drop)
+          # Balanced frequency for comfortable yet responsive braking
+          elif v_error < -2/3.6 and v_error_setpoint < 15.0/3.6 and accel < -0.4:
+            cruise_cmd(CruiseStalk.minus1, CRUISE_STALK_MINUS1_HOLD_TICK)
 
-          # MODE 4: Small Deceleration (Minus1 single)
-          # Entry: v_error < -1 km/h (slightly too fast) AND MPC wants deceleration
-          # Exit: v_error_setpoint > 5 km/h (prevent excessive setpoint drop)
-          elif v_error < -1/3.6 and v_error_setpoint < 5/3.6 and accel < 0.0:
-            cruise_cmd(CruiseStalk.minus1, hold=False)  # Single press at 20Hz
+          # MODE 4: Cruise Adjustment (Minus1 single @ 20Hz)
+          # Entry: v_error < -1 km/h AND light MPC deceleration (accel < 0)
+          # Exit: v_error_setpoint < 5 km/h (prevent excessive setpoint drop)
+          # Gentle speed adjustments for following and cruise control
+          elif v_error < -1.0/3.6 and v_error_setpoint < 5/3.6 and accel < 0:
+            cruise_cmd(CruiseStalk.minus1, CRUISE_STALK_MINUS1_SINGLE_TICK)
 
           # MODE 5: Deadband (Coast)
-          # ±1.5 km/h tolerance - no commands sent
+          # ±1 km/h tolerance - no commands sent
           # Prevents oscillation, allows natural speed variations
           # else: pass
 
