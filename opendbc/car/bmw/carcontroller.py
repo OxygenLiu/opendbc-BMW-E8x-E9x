@@ -145,7 +145,7 @@ class CarController(CarControllerBase):
         if CS.out.gasPressed:
           cruise_cmd(CruiseStalk.plus1)                                   # Support driver acceleration
         else:
-          # *** BMW DCC 6-Mode Velocity Control Strategy ***
+          # *** BMW DCC 5-Mode Velocity Control Strategy ***
           # See: ~/driving_data/docs/dcc_calibration_mode/DCC_Strategy_Complete.md
           #
           # v_error: velocity error relative to target (v_target - v_current)
@@ -160,43 +160,38 @@ class CarController(CarControllerBase):
           # - Emergency braking: Allow setpoint to drop 30 km/h below vEgo (safety priority)
           #
           # MEASURED REAL-WORLD PERFORMANCE (route 000000f1--7fed5392b6):
-          # - Plus1 held: 0.208 m/s² (sustained acceleration)
+          # - Plus1 single: Gentle acceleration (multiple presses accumulate)
           # - Minus1 held: -0.445 m/s² (normal deceleration)
           # - Minus5 held: -0.784 m/s² (emergency braking)
 
-          # MODE 1: Large Acceleration (Plus1 held)
-          # Entry: v_error > 5 km/h (need acceleration)
+          # MODE 1: Acceleration (Plus1 single)
+          # Entry: v_error > 1.5 km/h (need acceleration) AND MPC wants acceleration
           # Exit: v_error_setpoint > -5 km/h (setpoint within 5 km/h of vEgo - prevent overshoot)
-          if v_error > 5/3.6 and v_error_setpoint > -5/3.6:
-            cruise_cmd(CruiseStalk.plus1, hold=True)  # 0.208 m/s² sustained acceleration
-
-          # MODE 2: Small Acceleration (Plus1 single)
-          # Entry: v_error > 1 km/h (slight acceleration needed)
-          # Multiple single presses for N km/h adjustment
-          elif v_error > 1/3.6:
+          # Multiple single presses accumulate to reach target speed (comfortable, not aggressive)
+          if v_error > 1.5/3.6 and v_error_setpoint > -5/3.6 and accel > 0:
             cruise_cmd(CruiseStalk.plus1, hold=False)  # Single press at 20Hz
 
-          # MODE 3: Emergency Deceleration (Minus5 held) ⚠️
+          # MODE 2: Emergency Deceleration (Minus5 held) ⚠️
           # Entry: v_error < -10 km/h (much too fast - emergency!)
           # Exit: v_error_setpoint < 30 km/h (allow aggressive setpoint drop for safety)
           # Safety priority: better to over-brake than under-brake
           elif v_error < -10/3.6 and v_error_setpoint < 30/3.6:
             cruise_cmd(CruiseStalk.minus5, hold=True)  # -0.784 m/s² emergency braking
 
-          # MODE 4: Normal Deceleration (Minus1 held)
+          # MODE 3: Normal Deceleration (Minus1 held)
           # Entry: v_error < -5 km/h AND MPC wants deceleration
           # Exit: v_error > -5 km/h OR v_error_setpoint > 10 km/h (prevent excessive setpoint drop)
           elif v_error < -5/3.6 and v_error_setpoint < 10/3.6 and accel < 0.0:
             cruise_cmd(CruiseStalk.minus1, hold=True)  # -0.445 m/s² moderate braking
 
-          # MODE 5: Small Deceleration (Minus1 single)
+          # MODE 4: Small Deceleration (Minus1 single)
           # Entry: v_error < -1 km/h (slightly too fast) AND MPC wants deceleration
           # Exit: v_error_setpoint > 5 km/h (prevent excessive setpoint drop)
           elif v_error < -1/3.6 and v_error_setpoint < 5/3.6 and accel < 0.0:
             cruise_cmd(CruiseStalk.minus1, hold=False)  # Single press at 20Hz
 
-          # MODE 6: Deadband (Coast)
-          # ±1 km/h tolerance - no commands sent
+          # MODE 5: Deadband (Coast)
+          # ±1.5 km/h tolerance - no commands sent
           # Prevents oscillation, allows natural speed variations
           # else: pass
 
