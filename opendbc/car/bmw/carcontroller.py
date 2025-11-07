@@ -172,27 +172,27 @@ class CarController(CarControllerBase):
             cruise_cmd(CruiseStalk.plus1, CRUISE_STALK_PLUS1_SINGLE_TICK)
 
           # MODE 2: Emergency Deceleration (Minus5 held @ 100Hz) ⚠️
-          # Entry: v_error < -2 km/h AND strong MPC deceleration (accel < -1.0 m/s²)
+          # Entry: v_error < -2 km/h AND strong MPC deceleration (accel < -0.8 m/s²)
           # Maximum frequency for fastest response in emergency situations
-          elif v_error < -2/3.6 and accel < -1.0:
+          elif v_error < -2/3.6 and accel < -0.8:
             cruise_cmd(CruiseStalk.minus5, CRUISE_STALK_MINUS5_HOLD_TICK)
 
           # MODE 3: Moderate Deceleration (Minus1 held @ 40Hz)
-          # Entry: v_error < -2 km/h AND moderate MPC deceleration (accel < -0.4 m/s²)
+          # Entry: v_error < -2 km/h AND moderate MPC deceleration (accel < -0.3 m/s²)
           # Exit: v_error_setpoint < 15 km/h (prevent excessive setpoint drop)
           # Balanced frequency for comfortable yet responsive braking
-          elif v_error < -2/3.6 and v_error_setpoint < 15.0/3.6 and accel < -0.4:
+          elif v_error < -2/3.6 and v_error_setpoint < 15.0/3.6 and accel < -0.3:
             cruise_cmd(CruiseStalk.minus1, CRUISE_STALK_MINUS1_HOLD_TICK)
 
           # MODE 4: Cruise Adjustment (Minus1 single @ 20Hz)
-          # Entry: v_error < -1 km/h AND light MPC deceleration (accel < 0)
+          # Entry: v_error < -1.5 km/h AND light MPC deceleration (accel < -0)
           # Exit: v_error_setpoint < 5 km/h (prevent excessive setpoint drop)
           # Gentle speed adjustments for following and cruise control
-          elif v_error < -1.0/3.6 and v_error_setpoint < 5/3.6 and accel < 0:
+          elif v_error < -1.5/3.6 and v_error_setpoint < 5/3.6 and accel < 0:
             cruise_cmd(CruiseStalk.minus1, CRUISE_STALK_MINUS1_SINGLE_TICK)
 
           # MODE 5: Deadband (Coast)
-          # ±1 km/h tolerance - no commands sent
+          # ±1.5 km/h tolerance - no commands sent
           # Prevents oscillation, allows natural speed variations
           # else: pass
 
