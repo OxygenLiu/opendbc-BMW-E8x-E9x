@@ -572,6 +572,7 @@ struct CarParams {
     steeringAngleDeadzoneDeg @5 :Float32;
     latAccelFactor @6 :Float32;
     latAccelOffset @7 :Float32;
+    kd @8 :Float32;  # v0.10.1 derivative coefficient for damping
     useSteeringAngleDEPRECATED @0 :Bool;
   }
 
