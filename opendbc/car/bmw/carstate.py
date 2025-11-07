@@ -29,6 +29,7 @@ class CarState(CarStateBase):
     self.prev_cruise_stalk_resume = self.cruise_stalk_resume
     self.prev_cruise_stalk_cancel = self.cruise_stalk_cancel
     self.prev_cruise_enabled = False  # Track previous openpilot cruise state for resume button logic
+    self.resume_button_type_on_press = None  # Store button type decision from when resume was first pressed
 
     self.right_blinker_pressed = False
     self.left_blinker_pressed = False
@@ -163,18 +164,29 @@ class CarState(CarStateBase):
 
     self.prev_gas_pressed = ret.gasPressed
 
+    # Resume button type decision - store on first press, use for both press and release events
+    # This prevents the button type from changing when cruise engages between press and release
+    if self.cruise_stalk_resume and not self.prev_cruise_stalk_resume:
+      # Button just pressed - decide and store button type based on current cruise state
+      # - When cruise was NOT enabled → resumeCruise (engage with saved speed from Params)
+      # - When cruise WAS enabled → gapAdjustCruise (cycle driver personality)
+      self.resume_button_type_on_press = ButtonType.resumeCruise if not self.prev_cruise_enabled else ButtonType.gapAdjustCruise
+    elif not self.cruise_stalk_resume and self.prev_cruise_stalk_resume:
+      # Button just released - reset stored type for next press
+      self.resume_button_type_on_press = None
+
+    # Use stored button type if available (from when button was first pressed),
+    # otherwise fall back to current evaluation (shouldn't happen in normal operation)
+    resume_button_type = self.resume_button_type_on_press if self.resume_button_type_on_press is not None else (
+      ButtonType.resumeCruise if not self.prev_cruise_enabled else ButtonType.gapAdjustCruise
+    )
+
     ret.buttonEvents = [
       *create_button_events(self.cruise_stalk_speed > 0, self.prev_cruise_stalk_speed > 0, {1: ButtonType.accelCruise}),
       *create_button_events(self.cruise_stalk_speed < 0, self.prev_cruise_stalk_speed < 0, {1: ButtonType.decelCruise}),
       *create_button_events(self.cruise_stalk_cancel, self.prev_cruise_stalk_cancel, {1: ButtonType.cancel}),
       *create_button_events(self.other_buttons, not self.other_buttons, {1: ButtonType.altButton2}),
-      *create_button_events(self.cruise_stalk_resume, self.prev_cruise_stalk_resume, {
-        # Resume button behavior:
-        # - When cruise was NOT enabled in previous frame → resumeCruise (engage with saved speed from Params)
-        # - When cruise WAS enabled in previous frame → gapAdjustCruise (cycle driver personality)
-        # This ensures first resume press after startup/disengagement loads saved speed,
-        # while resume presses during active cruise cycle personality only.
-        1: ButtonType.resumeCruise if not self.prev_cruise_enabled else ButtonType.gapAdjustCruise})
+      *create_button_events(self.cruise_stalk_resume, self.prev_cruise_stalk_resume, {1: resume_button_type})
       ]
 
     self.cruise_state_enabled = ret.cruiseState.enabled
