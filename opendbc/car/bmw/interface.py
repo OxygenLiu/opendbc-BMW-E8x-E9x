@@ -251,9 +251,10 @@ class CarInterface(CarInterfaceBase):
 
     CarInterfaceBase.configure_torque_tune(candidate, ret.lateralTuning, steering_angle_deadzone_deg=0.0)
 
+    # BMW E-series lateral tuning optimized for v0.10.1 PID architecture
     ret.lateralTuning.torque.kp = 6.0 / CarControllerParams.STEER_MAX  # 0.5
     ret.lateralTuning.torque.ki = 3.0 / CarControllerParams.STEER_MAX  # 0.25
-    ret.lateralTuning.torque.kf = 10.0 / CarControllerParams.STEER_MAX  # 0.833
+    ret.lateralTuning.torque.kd = 1.5 / CarControllerParams.STEER_MAX  # 0.125 (derivative for damping)
 
     # BMW cruise stalk command processing delay - Two-step tuning strategy:
     # Phase 1 (current): Fixed 0.6s delay for validating DCC plus/minus mapping logic
