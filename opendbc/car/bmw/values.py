@@ -37,7 +37,7 @@ class BmwFlags(IntFlag):
 
 class CruiseSettings:
   CLUSTER_OFFSET = 2 # kph
-
+  MIN_SPEED_BUFFER = 5.0  # km/h - add to minEnableSpeed to avoid disengagement
 
 class CurveSpeedParams:
   """Predictive curve speed control parameters for BMW"""
