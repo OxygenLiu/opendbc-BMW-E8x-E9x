@@ -378,6 +378,9 @@ struct CarControl {
     # Vision-based speed for accurate velocity control
     visionSpeed @9: Float32;  # m/s - ModelV2 vision-estimated current speed
 
+    # BMW DCC fallback mode indicator
+    dccFallbackMode @10: Bool;  # True when using threshold-based fallback (table not loaded)
+
     enum LongControlState @0xe40f3a917d908282{
       off @0;
       pid @1;
