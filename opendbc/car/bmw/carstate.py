@@ -70,7 +70,7 @@ class CarState(CarStateBase):
     ret.steeringRateDeg = cp_PT.vl["SteeringWheelAngle"]['SteeringSpeed']
     can_gear = int(cp_PT.vl["TransmissionDataDisplay"]['ShiftLeverPosition'])
     ret.gearShifter = self.parse_gear_shifter(self.shifter_values.get(can_gear, None))
-    
+
     # TurnSignals is pre-subscribed with nan frequency, so missing messages won't break can_valid
     # If missing, signals will be 0/default values, which is correct behavior
     blinker_on = cp_PT.vl["TurnSignals"]['TurnSignalActive'] != 0 and cp_PT.vl["TurnSignals"]['TurnSignalIdle'] == 0
@@ -204,15 +204,16 @@ class CarState(CarStateBase):
   def get_can_parsers(CP):
     # Only pre-subscribe problematic messages that are often completely missing
     # All other messages auto-subscribe dynamically when CarState.update() accesses them
-    
+
     # Use float('nan') for ignore_alive=True on missing/sparse messages
     pt_messages = [
       ("TurnSignals", float('nan')),             # MISSING entirely - ignore liveness
-      ("Status_contact_handbrake", float('nan')), # Very sparse (24 msgs) - ignore liveness  
+      ("Status_contact_handbrake", float('nan')), # Very sparse (24 msgs) - ignore liveness
+      ("EngineData", float('nan')),              # BMW vitals: coolant & oil temps - may be sparse
     ]
-    
+
     fcan_messages = []
-    
+
     servo_can_messages = []
 
     return {
