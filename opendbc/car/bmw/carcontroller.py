@@ -185,15 +185,19 @@ class CarController(CarControllerBase):
           current_time = now_nanos / 1e9
 
           # ACCELERATION: v_error > 1.0 km/h and MPC requests acceleration
-          # Strategy: Send round(v_error) plus1 commands at 2Hz to match setpoint to target
-          if v_error > 1.0/3.6 and accel > 0:
+          # Strategy: Send plus1 commands at 5Hz with 3 km/h setpoint overshoot buffer
+          # The 3 km/h buffer prevents both aggressive overshoot and sluggish response
+          v_error_setpoint = v_target - CS.out.cruiseState.speed  # Setpoint vs target error
+
+          if v_error > 1.0/3.6 and accel > 0 and v_error_setpoint > -3.0/3.6:
+            # Allow setpoint to be up to 3 km/h above v_target for proactive acceleration
+            # This prevents: aggressive overshoot (had no limit) AND sluggish response (v_error_setpoint < 0)
             # Calculate how many km/h to increase setpoint (rounded)
             v_error_kmh = v_error * 3.6
             setpoint_increase_needed = int(round(v_error_kmh))
 
-            # Send plus1 commands at 2Hz (CRUISE_STALK_PLUS1_SINGLE_TICK = 0.5s)
+            # Send plus1 commands at 5Hz (CRUISE_STALK_PLUS1_SINGLE_TICK = 0.2s)
             # Each plus1 command increases setpoint by 1 km/h
-            # Slower rate (2Hz vs 20Hz) provides more comfortable acceleration
             time_since_last_accel = current_time - self.last_accel_time
 
             if time_since_last_accel >= CRUISE_STALK_PLUS1_SINGLE_TICK and setpoint_increase_needed > 0:
