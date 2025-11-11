@@ -149,6 +149,12 @@ class CarState(CarStateBase):
 
     ret.genericToggle = self.dtc_mode
 
+    # BMW vitals (temperatures only - battery voltage comes from peripheralState hardware sensor)
+    # EngineData (0x1D0): TEMP_ENG (coolant) and TEMP_EOI (oil)
+    ret.coolantTemp = cp_PT.vl["EngineData"]["TEMP_ENG"]
+    ret.oilTemp = cp_PT.vl["EngineData"]["TEMP_EOI"]
+    # Note: batteryVoltage is NOT set here - UI reads from peripheralState.voltage instead
+
     # BMW DCC velocity-difference-based T_FOLLOW scaling
     # BMW has no radar hardware - radarState comes from vision model (ModelV2)
     # Learned T_FOLLOW scales are published via liveDelay message and consumed by planner

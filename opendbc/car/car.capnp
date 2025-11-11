@@ -230,6 +230,10 @@ struct CarState {
   fuelGauge @41 :Float32; # battery or fuel tank level from [0.0, 1.0]
   charging @43 :Bool;
 
+  # BMW vitals
+  coolantTemp @61 :Float32;  # engine coolant temperature in Celsius
+  oilTemp @62 :Float32;      # engine oil temperature in Celsius
+
   struct WheelSpeeds {
     # optional wheel speeds
     fl @0 :Float32;
