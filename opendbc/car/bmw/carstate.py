@@ -8,6 +8,11 @@ import cereal.messaging as messaging
 
 ButtonType = structs.CarState.ButtonEvent.Type
 
+# Resume button hold duration threshold (in frames at 100Hz = 10ms per frame)
+# 1 second = 100 frames, but counter increments 99 times (reset to 0 on first press, then 99 increments)
+# So threshold is 99 to detect 100 frames (1 second) of button press
+RESUME_LONG_PRESS_FRAMES = 99
+
 
 class CarState(CarStateBase):
   def __init__(self, CP):
@@ -29,7 +34,7 @@ class CarState(CarStateBase):
     self.prev_cruise_stalk_resume = self.cruise_stalk_resume
     self.prev_cruise_stalk_cancel = self.cruise_stalk_cancel
     self.prev_cruise_enabled = False  # Track previous openpilot cruise state for resume button logic
-    self.resume_button_type_on_press = None  # Store button type decision from when resume was first pressed
+    self.resume_button_hold_frames = 0  # Track how many frames resume button has been held (v4 duration-based logic)
 
     self.right_blinker_pressed = False
     self.left_blinker_pressed = False
@@ -170,29 +175,62 @@ class CarState(CarStateBase):
 
     self.prev_gas_pressed = ret.gasPressed
 
-    # Resume button type decision - store on first press, use for both press and release events
-    # This prevents the button type from changing when cruise engages between press and release
-    if self.cruise_stalk_resume and not self.prev_cruise_stalk_resume:
-      # Button just pressed - decide and store button type based on current cruise state
-      # - When cruise was NOT enabled → resumeCruise (engage with saved speed from Params)
-      # - When cruise WAS enabled → gapAdjustCruise (cycle driver personality)
-      self.resume_button_type_on_press = ButtonType.resumeCruise if not self.prev_cruise_enabled else ButtonType.gapAdjustCruise
-    elif not self.cruise_stalk_resume and self.prev_cruise_stalk_resume:
-      # Button just released - reset stored type for next press
-      self.resume_button_type_on_press = None
+    # Resume button duration-based logic (v4):
+    # - Short press when cruise NOT engaged → resumeCruise (engage openpilot)
+    # - Long press (≥1s) when cruise ALREADY engaged → gapAdjustCruise (cycle personality)
+    # This eliminates timing race conditions from edge detection
 
-    # Use stored button type if available (from when button was first pressed),
-    # otherwise fall back to current evaluation (shouldn't happen in normal operation)
-    resume_button_type = self.resume_button_type_on_press if self.resume_button_type_on_press is not None else (
-      ButtonType.resumeCruise if not self.prev_cruise_enabled else ButtonType.gapAdjustCruise
-    )
+    resume_button_events = []
+
+    # Track button hold duration
+    if self.cruise_stalk_resume:
+      # Button is pressed - increment hold counter
+      if not self.prev_cruise_stalk_resume:
+        # Just pressed - reset counter
+        self.resume_button_hold_frames = 0
+      else:
+        # Still holding - increment counter
+        self.resume_button_hold_frames += 1
+    else:
+      # Button not pressed - reset counter
+      self.resume_button_hold_frames = 0
+
+    # Generate button events based on press/release edges and hold duration
+    if self.cruise_stalk_resume and not self.prev_cruise_stalk_resume:
+      # Button just pressed
+      if not self.prev_cruise_enabled:
+        # Cruise not engaged → immediate resumeCruise press event (engage openpilot)
+        resume_button_events.append(structs.CarState.ButtonEvent(
+          pressed=True,
+          type=ButtonType.resumeCruise
+        ))
+
+    elif not self.cruise_stalk_resume and self.prev_cruise_stalk_resume:
+      # Button just released
+      if not self.prev_cruise_enabled:
+        # Was not engaged when pressed → send resumeCruise release event
+        resume_button_events.append(structs.CarState.ButtonEvent(
+          pressed=False,
+          type=ButtonType.resumeCruise
+        ))
+      elif self.resume_button_hold_frames >= RESUME_LONG_PRESS_FRAMES:
+        # Was engaged and held for ≥1 second → send gapAdjustCruise press+release
+        resume_button_events.append(structs.CarState.ButtonEvent(
+          pressed=True,
+          type=ButtonType.gapAdjustCruise
+        ))
+        resume_button_events.append(structs.CarState.ButtonEvent(
+          pressed=False,
+          type=ButtonType.gapAdjustCruise
+        ))
+      # else: short press while engaged → ignore (no event)
 
     ret.buttonEvents = [
       *create_button_events(self.cruise_stalk_speed > 0, self.prev_cruise_stalk_speed > 0, {1: ButtonType.accelCruise}),
       *create_button_events(self.cruise_stalk_speed < 0, self.prev_cruise_stalk_speed < 0, {1: ButtonType.decelCruise}),
       *create_button_events(self.cruise_stalk_cancel, self.prev_cruise_stalk_cancel, {1: ButtonType.cancel}),
       *create_button_events(self.other_buttons, not self.other_buttons, {1: ButtonType.altButton2}),
-      *create_button_events(self.cruise_stalk_resume, self.prev_cruise_stalk_resume, {1: resume_button_type})
+      *resume_button_events  # Use duration-based button events list
       ]
 
     self.cruise_state_enabled = ret.cruiseState.enabled
