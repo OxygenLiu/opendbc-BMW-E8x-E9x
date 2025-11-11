@@ -22,7 +22,7 @@ CRUISE_STALK_HOLD_TICK_STOCK = 0.025  # 40Hz - stock held stalk
 
 # Openpilot DCC Emulation - Frequency-based command rates
 # Different modes use different frequencies for comfort and responsiveness
-CRUISE_STALK_PLUS1_SINGLE_TICK = 0.5    # 2Hz - gentle acceleration (more comfortable than 20Hz)
+CRUISE_STALK_PLUS1_SINGLE_TICK = 0.2    # 5Hz - improved acceleration response (was 2Hz)
 CRUISE_STALK_MINUS5_HOLD_TICK = 0.01    # 100Hz - emergency braking (maximum rate)
 CRUISE_STALK_MINUS1_HOLD_TICK = 0.025   # 40Hz - moderate braking (held)
 CRUISE_STALK_MINUS1_SINGLE_TICK = 0.05  # 20Hz - cruise adjustment (single presses)
