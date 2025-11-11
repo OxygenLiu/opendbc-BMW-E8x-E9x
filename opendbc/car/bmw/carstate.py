@@ -39,6 +39,7 @@ class CarState(CarStateBase):
     self.right_blinker_pressed = False
     self.left_blinker_pressed = False
     self.other_buttons = False
+    self.prev_other_buttons = False
     self.prev_gas_pressed = False
     self.dtc_mode = False
 
@@ -229,12 +230,13 @@ class CarState(CarStateBase):
       *create_button_events(self.cruise_stalk_speed > 0, self.prev_cruise_stalk_speed > 0, {1: ButtonType.accelCruise}),
       *create_button_events(self.cruise_stalk_speed < 0, self.prev_cruise_stalk_speed < 0, {1: ButtonType.decelCruise}),
       *create_button_events(self.cruise_stalk_cancel, self.prev_cruise_stalk_cancel, {1: ButtonType.cancel}),
-      *create_button_events(self.other_buttons, not self.other_buttons, {1: ButtonType.altButton2}),
+      *create_button_events(self.other_buttons, self.prev_other_buttons, {1: ButtonType.altButton2}),
       *resume_button_events  # Use duration-based button events list
       ]
 
     self.cruise_state_enabled = ret.cruiseState.enabled
     self.prev_cruise_enabled = ret.cruiseState.enabled  # Save for next frame's resume button logic
+    self.prev_other_buttons = self.other_buttons  # Save for next frame's altButton2 detection
     return ret
 
   # this is only to satisfy non pcmCruise test in test_panda_safety_carstate that requires button_enable
