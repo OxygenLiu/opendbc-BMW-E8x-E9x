@@ -352,8 +352,8 @@ BO_ 451 Distance_message_2_PDC: 8 PDC
 BO_ 454 Acoustic_message_PDC: 8 PDC
 
 BO_ 464 EngineData: 8 DME
- SG_ TEMP_ENG : 0|8@1+ (1,0) [0|0] "C" XXX
- SG_ TEMP_EOI : 8|8@1+ (1,0) [0|0] "C" XXX
+ SG_ TEMP_ENG : 0|8@1+ (1,-48) [0|0] "C" XXX
+ SG_ TEMP_EOI : 8|8@1+ (1,-48) [0|0] "C" XXX
  SG_ Counter_0x1d0 : 16|4@1+ (1,0) [0|14] "" XXX
  SG_ ST_ENG_RUN : 20|2@1+ (1,0) [0|0] "" XXX
  SG_ ST_SW_WAUP : 22|2@1+ (1,0) [0|0] "" XXX
