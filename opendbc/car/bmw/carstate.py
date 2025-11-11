@@ -257,6 +257,10 @@ class CarState(CarStateBase):
     ]
 
     fcan_messages = []
+    # DCC mode reads CruiseControlStalk from F-CAN (carstate.py:117)
+    # Must pre-subscribe to ensure message history available for resume button detection
+    if CP.flags & BmwFlags.DYNAMIC_CRUISE_CONTROL:
+      fcan_messages.append(("CruiseControlStalk", 5))  # 5Hz in DCC mode
 
     servo_can_messages = []
 
