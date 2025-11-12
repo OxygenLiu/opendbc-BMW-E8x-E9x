@@ -185,13 +185,25 @@ class CarController(CarControllerBase):
           current_time = now_nanos / 1e9
 
           # ACCELERATION: v_error > 1.0 km/h and MPC requests acceleration
-          # Strategy: Send plus1 commands at 5Hz with 3 km/h setpoint overshoot buffer
-          # The 3 km/h buffer prevents both aggressive overshoot and sluggish response
+          # Strategy: Send plus1 commands at 5Hz with speed-dependent setpoint buffer
+          # Phase 3: Speed-dependent buffer scaling to prevent high-speed overshoot
+          #   - 70 km/h: 2.5 km/h buffer (proven sweet spot from Phase 2)
+          #   - 140 km/h: 0.0 km/h buffer (no overshoot at very high speeds)
+          #   - Linear interpolation between these points
+          #   - CRITICAL: Smaller buffer at high speeds prevents overshoot
           v_error_setpoint = v_target - CS.out.cruiseState.speed  # Setpoint vs target error
 
-          if v_error > 1.0/3.6 and accel > 0 and v_error_setpoint > -3.0/3.6:
-            # Allow setpoint to be up to 3 km/h above v_target for proactive acceleration
-            # This prevents: aggressive overshoot (had no limit) AND sluggish response (v_error_setpoint < 0)
+          # Calculate speed-dependent buffer (in km/h)
+          v_ego_kph = CS.out.vEgo * 3.6
+          if v_ego_kph <= 70.0:
+            buffer_kph = 2.5
+          else:
+            # Linear interpolation: 2.5 km/h @ 70 km/h → 0.0 km/h @ 140 km/h
+            buffer_kph = 2.5 - ((v_ego_kph - 70.0) / 70.0) * 2.5
+
+          if v_error > 1.0/3.6 and accel > 0 and v_error_setpoint > -buffer_kph/3.6:
+            # Allow setpoint to exceed v_target by speed-dependent buffer (2.5→0.0 km/h)
+            # Zero buffer at 140+ km/h prevents any overshoot at very high speeds
             # Calculate how many km/h to increase setpoint (rounded)
             v_error_kmh = v_error * 3.6
             setpoint_increase_needed = int(round(v_error_kmh))
