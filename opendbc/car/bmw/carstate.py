@@ -169,10 +169,10 @@ class CarState(CarStateBase):
     if self.CP.flags & BmwFlags.STEPPER_SERVO_CAN:
       ret.steeringTorqueEps = cp_aux.vl['STEERING_STATUS']['STEERING_TORQUE']
       ret.steeringAngleOffsetDeg = ret.steeringAngleDeg - cp_aux.vl['STEERING_STATUS']['STEERING_ANGLE']
-      ret.steerFaultTemporary = int(cp_aux.vl['STEERING_STATUS']['DEBUG_STATES']) & 0x20 != 0 # Comm error
-      ret.steerFaultTemporary |= int(cp_aux.vl['STEERING_STATUS']['DEBUG_STATES']) & 0x40 != 0 # motion task overrun
-      ret.steerFaultTemporary |= int(cp_aux.vl['STEERING_STATUS']['DEBUG_STATES']) & 0x80 != 0 # service task overrun
-      ret.steerFaultTemporary = int(cp_aux.vl['STEERING_STATUS']['CONTROL_STATUS']) & 0x4 != 0 # SOFT_OFF lockout
+      ret.steerFaultTemporary = (int(cp_aux.vl['STEERING_STATUS']['DEBUG_STATES']) & 0x20) != 0 # Comm error
+      ret.steerFaultTemporary |= (int(cp_aux.vl['STEERING_STATUS']['DEBUG_STATES']) & 0x40) != 0 # motion task overrun
+      ret.steerFaultTemporary |= (int(cp_aux.vl['STEERING_STATUS']['DEBUG_STATES']) & 0x80) != 0 # service task overrun
+      ret.steerFaultTemporary |= (int(cp_aux.vl['STEERING_STATUS']['CONTROL_STATUS']) & 0x4) != 0 # SOFT_OFF lockout
 
     self.prev_gas_pressed = ret.gasPressed
 
