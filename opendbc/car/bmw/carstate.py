@@ -198,24 +198,17 @@ class CarState(CarStateBase):
 
     # Generate button events based on press/release edges and hold duration
     if self.cruise_stalk_resume and not self.prev_cruise_stalk_resume:
-      # Button just pressed
-      if not self.prev_cruise_enabled:
-        # Cruise not engaged → immediate resumeCruise press event (engage openpilot)
-        resume_button_events.append(structs.CarState.ButtonEvent(
-          pressed=True,
-          type=ButtonType.resumeCruise
-        ))
+      # Button just pressed - always generate resumeCruise event
+      # BMW DCC stock cruise engages instantly, so we can't rely on prev_cruise_enabled
+      resume_button_events.append(structs.CarState.ButtonEvent(
+        pressed=True,
+        type=ButtonType.resumeCruise
+      ))
 
     elif not self.cruise_stalk_resume and self.prev_cruise_stalk_resume:
       # Button just released
-      if not self.prev_cruise_enabled:
-        # Was not engaged when pressed → send resumeCruise release event
-        resume_button_events.append(structs.CarState.ButtonEvent(
-          pressed=False,
-          type=ButtonType.resumeCruise
-        ))
-      elif self.resume_button_hold_frames >= RESUME_LONG_PRESS_FRAMES:
-        # Was engaged and held for ≥1 second → send gapAdjustCruise press+release
+      if self.resume_button_hold_frames >= RESUME_LONG_PRESS_FRAMES:
+        # Held for ≥1 second → send gapAdjustCruise press+release (personality cycle)
         resume_button_events.append(structs.CarState.ButtonEvent(
           pressed=True,
           type=ButtonType.gapAdjustCruise
@@ -224,7 +217,12 @@ class CarState(CarStateBase):
           pressed=False,
           type=ButtonType.gapAdjustCruise
         ))
-      # else: short press while engaged → ignore (no event)
+      else:
+        # Short press → send resumeCruise release event
+        resume_button_events.append(structs.CarState.ButtonEvent(
+          pressed=False,
+          type=ButtonType.resumeCruise
+        ))
 
     ret.buttonEvents = [
       *create_button_events(self.cruise_stalk_speed > 0, self.prev_cruise_stalk_speed > 0, {1: ButtonType.accelCruise}),
