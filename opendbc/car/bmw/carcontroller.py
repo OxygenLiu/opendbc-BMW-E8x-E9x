@@ -255,24 +255,30 @@ class CarController(CarControllerBase):
             self.dcc_ticks_remaining = 0  # Reset braking sequence state
 
     if self.flags & BmwFlags.STEPPER_SERVO_CAN:
-      steer_error = not CC.latActive and CC.enabled
-      if not steer_error: # don't send steer CAN tx if steering is unavailable
-        # *** apply steering torque ***
-        if CC.enabled:
-          new_steer = actuators.torque * CarControllerParams.STEER_MAX
-          # explicitly clip torque before sending on CAN:
-          # - don't use apply_meas_steer_torque_limits() due to integer rounding
-          apply_torque = apply_dist_to_meas_limits(new_steer, self.apply_torque_last, CS.out.steeringTorqueEps,
-                                             CarControllerParams.STEER_DELTA_UP, CarControllerParams.STEER_DELTA_DOWN,
-                                             CarControllerParams.STEER_ERROR_MAX, CarControllerParams.STEER_MAX)
-          can_sends.append(bmwcan.create_steer_command(self.frame, SteeringModes.TorqueControl, apply_torque))
-        elif not CS.cruise_stalk_cancel and not CS.out.brakePressed and not CS.out.gasPressed and self.apply_torque_last != 0:
-          can_sends.append(bmwcan.create_steer_command(self.frame, SteeringModes.SoftOff, self.apply_torque_last))
-          apply_torque = CS.out.steeringTorqueEps
-        else:
-          apply_torque = 0
-          can_sends.append(bmwcan.create_steer_command(self.frame, SteeringModes.Off))
-        self.apply_torque_last = apply_torque
+      # *** apply steering torque ***
+      # CRITICAL: Always send 0x22E STEERING_COMMAND at 100Hz to prevent COMM errors
+      # Stepper servo firmware expects continuous communication - gaps > 50ms trigger SOFT_OFF lockout
+      # Previous bug: steer_error guard caused 0x22E to be skipped when CC.latActive=False
+      # This created 1.4s gaps during lateral control disable, triggering servo COMM error protection
+
+      if CC.enabled and CC.latActive:
+        # Active steering control
+        new_steer = actuators.torque * CarControllerParams.STEER_MAX
+        # explicitly clip torque before sending on CAN:
+        # - don't use apply_meas_steer_torque_limits() due to integer rounding
+        apply_torque = apply_dist_to_meas_limits(new_steer, self.apply_torque_last, CS.out.steeringTorqueEps,
+                                           CarControllerParams.STEER_DELTA_UP, CarControllerParams.STEER_DELTA_DOWN,
+                                           CarControllerParams.STEER_ERROR_MAX, CarControllerParams.STEER_MAX)
+        can_sends.append(bmwcan.create_steer_command(self.frame, SteeringModes.TorqueControl, apply_torque))
+      elif not CS.cruise_stalk_cancel and not CS.out.brakePressed and not CS.out.gasPressed and self.apply_torque_last != 0:
+        # Graceful ramp-down when disengaging
+        can_sends.append(bmwcan.create_steer_command(self.frame, SteeringModes.SoftOff, self.apply_torque_last))
+        apply_torque = CS.out.steeringTorqueEps
+      else:
+        # Disabled - send Off mode to maintain 100Hz communication
+        apply_torque = 0
+        can_sends.append(bmwcan.create_steer_command(self.frame, SteeringModes.Off))
+      self.apply_torque_last = apply_torque
 
     # debug
     if CC.enabled and (self.frame % 10) == 0: #slow print
