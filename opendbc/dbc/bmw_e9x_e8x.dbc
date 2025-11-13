@@ -273,7 +273,7 @@ BO_ 403 DynamicCruiseControlStatus: 8 DSC
 
 BO_ 404 CruiseControlStalk: 4 SZL
  SG_ Checksum_0x194 : 7|8@0+ (1,0) [0|255] "" XXX
- SG_ Counter_0x194 : 11|4@0+ (1,0) [0|15] "" XXX
+ SG_ Counter_0x194 : 11|4@0+ (1,0) [0|14] "" XXX
  SG_ requests_0xF : 15|4@0+ (1,0) [0|15] "" XXX
  SG_ plus1 : 16|1@0+ (1,0) [0|1] "" XXX
  SG_ plus5 : 17|1@0+ (1,0) [0|1] "" Vector__XXX
