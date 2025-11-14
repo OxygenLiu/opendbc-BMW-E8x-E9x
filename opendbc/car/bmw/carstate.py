@@ -9,9 +9,10 @@ import cereal.messaging as messaging
 ButtonType = structs.CarState.ButtonEvent.Type
 
 # Resume button hold duration threshold (in frames at 100Hz = 10ms per frame)
-# 1 second = 100 frames, but counter increments 99 times (reset to 0 on first press, then 99 increments)
-# So threshold is 99 to detect 100 frames (1 second) of button press
-RESUME_LONG_PRESS_FRAMES = 99
+# 0.5 seconds = 50 frames, but counter increments 49 times (reset to 0 on first press, then 49 increments)
+# So threshold is 49 to detect 50 frames (0.5 seconds) of button press
+# This makes personality cycling more practical (easier to hold for 0.5s than 1s)
+RESUME_LONG_PRESS_FRAMES = 49
 
 
 class CarState(CarStateBase):
@@ -176,9 +177,9 @@ class CarState(CarStateBase):
 
     self.prev_gas_pressed = ret.gasPressed
 
-    # Resume button duration-based logic (v4):
-    # - Short press when cruise NOT engaged → resumeCruise (engage openpilot)
-    # - Long press (≥1s) when cruise ALREADY engaged → gapAdjustCruise (cycle personality)
+    # Resume button duration-based logic (v6):
+    # - Short press (<0.5s) when cruise NOT engaged → resumeCruise (engage openpilot)
+    # - Long press (≥0.5s) when cruise ALREADY engaged → gapAdjustCruise (cycle personality)
     # This eliminates timing race conditions from edge detection
 
     resume_button_events = []
@@ -208,7 +209,7 @@ class CarState(CarStateBase):
     elif not self.cruise_stalk_resume and self.prev_cruise_stalk_resume:
       # Button just released
       if self.resume_button_hold_frames >= RESUME_LONG_PRESS_FRAMES:
-        # Held for ≥1 second → send gapAdjustCruise press+release (personality cycle)
+        # Held for ≥0.5 seconds → send gapAdjustCruise press+release (personality cycle)
         resume_button_events.append(structs.CarState.ButtonEvent(
           pressed=True,
           type=ButtonType.gapAdjustCruise
