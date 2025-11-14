@@ -259,8 +259,9 @@ class CarState(CarStateBase):
     fcan_messages = []
     # DCC mode reads CruiseControlStalk from F-CAN (carstate.py:117)
     # Must pre-subscribe to ensure message history available for resume button detection
+    # Variable frequency: 5Hz idle, 20Hz during button presses - use float('nan') for immediate processing
     if CP.flags & BmwFlags.DYNAMIC_CRUISE_CONTROL:
-      fcan_messages.append(("CruiseControlStalk", 5))  # 5Hz in DCC mode
+      fcan_messages.append(("CruiseControlStalk", float('nan')))  # Variable freq: process immediately
 
     servo_can_messages = []
 
