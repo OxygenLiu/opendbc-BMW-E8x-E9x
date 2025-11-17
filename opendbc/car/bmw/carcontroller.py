@@ -195,12 +195,9 @@ class CarController(CarControllerBase):
 
           # Calculate speed-dependent buffer (in km/h)
           v_ego_kph = CS.out.vEgo * 3.6
-          if v_ego_kph <= 60.0:
-            # below 60km/h, 2.0km/h
-            buffer_kph = 2.0
-          elif v_ego_kph <=120.0:
-            # Linear interpolation: 2.0 km/h @ 60 km/h → 0.0 km/h @ 120 km/h
-            buffer_kph = 2.0 - ((v_ego_kph - 60.0) / 60.0) * 2.0
+          if v_ego_kph <= 120.0:
+            # Linear interpolation: 3.0 km/h @ 0 km/h → 0.0 km/h @ 120 km/h
+            buffer_kph =  (1.0 - v_ego_kph / 120.0) * 3.0
           else:
             # above 120km/h, 0.0 km/h
             buffer_kph = 0.0
