@@ -40,32 +40,8 @@ class CruiseSettings:
   MIN_SPEED_BUFFER = 1.0  # km/h - add to minEnableSpeed to avoid disengagement
 
 class CurveSpeedParams:
-  """Predictive curve speed control parameters for BMW"""
-  LOOKAHEAD_TIME = 3.0  # seconds - look ahead for upcoming curves
-  LAT_ACCEL_LIMIT = 2.5  # m/s² - EU guideline ISO 11270 (changed from 2.0)
-  SPEED_MARGIN = 0.85    # 15% safety margin on calculated curve speed
-  MIN_CURVATURE_THRESHOLD = 0.003  # Ignore very gentle curves (< 1/333m radius)
-  MIN_SPEED_BUFFER = 5.0  # km/h - add to minEnableSpeed to avoid disengagement
-
-
-class LongitudinalPersonalityParams:
-  # BMW DCC velocity-difference-based T_FOLLOW scaling
-  # Adjusts following distance based on closing speed to lead vehicle
-  # Extended to cover both deceleration (positive vrel) and acceleration (negative vrel) phases
-
-  # Velocity difference breakpoints (v_ego - v_lead) in kph
-  # Negative vrel: catching up to faster lead (acceleration phase)
-  # Positive vrel: approaching slower lead (deceleration phase)
-  VREL_BP_KPH = [-40, -30, -20, -10, 0, 10, 20, 30, 40]  # kph
-
-  # Convert to m/s for runtime interpolation
-  VREL_BP = [v / 3.6 for v in VREL_BP_KPH]  # m/s
-
-  # T_FOLLOW scale factors (multipliers applied to base T_FOLLOW)
-  # Initial values: 1.0 (no scaling - use default t_follow)
-  # Learned values will be updated based on driver behavior in both phases
-  T_FOLLOW_SCALE_FACTORS = [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0]
-
+  """Lateral acceleration limit for curve speed control"""
+  LAT_ACCEL_LIMIT = 2.5  # m/s² - EU guideline ISO 11270
 
 class CanBus:
   PT_CAN = 0

@@ -3,7 +3,7 @@ from opendbc.can import CANDefine, CANParser
 from opendbc.car import Bus, structs, create_button_events
 from opendbc.car.common.conversions import Conversions as CV
 from opendbc.car.interfaces import CarStateBase
-from opendbc.car.bmw.values import DBC, CanBus, BmwFlags, CruiseSettings, LongitudinalPersonalityParams
+from opendbc.car.bmw.values import DBC, CanBus, BmwFlags, CruiseSettings
 import cereal.messaging as messaging
 
 ButtonType = structs.CarState.ButtonEvent.Type
