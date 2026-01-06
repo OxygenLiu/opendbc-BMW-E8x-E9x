@@ -42,7 +42,7 @@ class CruiseSettings:
 class CurveSpeedParams:
   """Predictive curve speed control parameters for BMW"""
   LOOKAHEAD_TIME = 3.0  # seconds - look ahead for upcoming curves
-  LAT_ACCEL_LIMIT = 2.0  # m/s² - from BMW_E90 override.toml MAX_LAT_ACCEL_MEASURED
+  LAT_ACCEL_LIMIT = 2.5  # m/s² - EU guideline ISO 11270 (changed from 2.0)
   SPEED_MARGIN = 0.85    # 15% safety margin on calculated curve speed
   MIN_CURVATURE_THRESHOLD = 0.003  # Ignore very gentle curves (< 1/333m radius)
   MIN_SPEED_BUFFER = 5.0  # km/h - add to minEnableSpeed to avoid disengagement
