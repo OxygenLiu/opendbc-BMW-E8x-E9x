@@ -39,10 +39,6 @@ class CruiseSettings:
   CLUSTER_OFFSET = 2 # kph
   MIN_SPEED_BUFFER = 1.0  # km/h - add to minEnableSpeed to avoid disengagement
 
-class CurveSpeedParams:
-  """Lateral acceleration limit for curve speed control"""
-  LAT_ACCEL_LIMIT = 2.5  # m/s² - EU guideline ISO 11270
-
 class CanBus:
   PT_CAN = 0
   SERVO_CAN = 1  # required for steering (STEPPER_SERVO can be on this bus)
