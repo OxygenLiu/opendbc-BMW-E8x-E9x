@@ -11,7 +11,7 @@ from opendbc.car.fw_query_definitions import LiveFwVersions, OfflineFwVersions, 
 
 class CarControllerParams: #controls running @ 100hz
   STEER_STEP = 1 # 100Hz
-  STEER_MAX = 12  # Nm
+  STEER_MAX = 14  # Nm, 42HS4813A4, 14:1
   STEER_DELTA_UP = 0.1       # Nm/10ms
   STEER_DELTA_DOWN = 1.0     # Nm/10ms
   STEER_ERROR_MAX = 999     # max delta between torque cmd and torque motor
