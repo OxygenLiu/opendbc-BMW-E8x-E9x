@@ -35,7 +35,7 @@ class TestBMWLatControl:
 
     for _ in range(1000):
       _, _, lac_log = controller.update(True, CS, VM, params, False, 1, False, 0.2)
-    assert lac_log.saturated
+      assert lac_log.saturated
 
   @parameterized.expand([(BMW.BMW_E90, LatControlTorque)])
   def test_bmw_version_logging(self, car_name, controller):
@@ -82,7 +82,7 @@ class TestBMWLatControl:
 
     # Check that desired lateral jerk is logged
     _, _, lac_log = controller.update(True, CS, VM, params, False, 1.0, False, 0.2)
-    assert hasattr(lac_log, 'desiredLateralJerk')
+    assert hasattr(lac_log, "desiredLateralJerk")
     assert lac_log.actualLateralAccel != 0.0
     assert lac_log.desiredLateralAccel != 0.0
 
