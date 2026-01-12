@@ -2,6 +2,7 @@
 
 #include <stdint.h>
 #include <stdbool.h>
+#include "opendbc/safety/can.h"
 
 #define GET_BYTE(msg, b) ((msg)->data[(b)])
 
