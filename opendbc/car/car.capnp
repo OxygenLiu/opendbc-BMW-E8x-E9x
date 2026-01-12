@@ -580,7 +580,6 @@ struct CarParams {
     kpDEPRECATED @1 :Float32;
     kiDEPRECATED @2 :Float32;
     kfDEPRECATED @4 :Float32;
-    kdDEPRECATED @8 : Float32;
   }
 
   struct LongitudinalPIDTuning {
