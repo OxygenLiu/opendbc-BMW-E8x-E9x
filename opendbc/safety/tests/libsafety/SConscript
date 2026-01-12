@@ -1,4 +1,5 @@
 import platform
+import os
 
 system = platform.system()
 
@@ -9,26 +10,35 @@ if system == "Darwin":
 else:
   mull_plugin = '/usr/lib/mull-ir-frontend-17'
 
+# Build CFLAGS list
+cflags = [
+  '-Wall',
+  "-Wextra",
+  '-Werror',
+  '-nostdlib',
+  '-fno-builtin',
+  '-std=gnu11',
+  '-Wfatal-errors',
+  '-Wno-pointer-to-int-cast',
+  '-g',
+  '-O0',
+  '-fno-omit-frame-pointer',
+  '-fprofile-arcs',
+  '-ftest-coverage',
+]
+
+# Only add mull plugin if it exists (optional mutation testing)
+if os.path.exists(mull_plugin):
+  cflags.append(f'-fpass-plugin={mull_plugin}')
+
+cflags.extend([
+  '-grecord-command-line',
+  '-DALLOW_DEBUG',
+])
+
 env = Environment(
   CC='clang-17',
-  CFLAGS=[
-    '-Wall',
-    "-Wextra",
-    '-Werror',
-    '-nostdlib',
-    '-fno-builtin',
-    '-std=gnu11',
-    '-Wfatal-errors',
-    '-Wno-pointer-to-int-cast',
-    '-g',
-    '-O0',
-    '-fno-omit-frame-pointer',
-    '-fprofile-arcs',
-    '-ftest-coverage',
-    f'-fpass-plugin={mull_plugin}',
-    '-grecord-command-line',
-    '-DALLOW_DEBUG',
-  ],
+  CFLAGS=cflags,
   LINKFLAGS=[
     '-fprofile-arcs',
     '-ftest-coverage',

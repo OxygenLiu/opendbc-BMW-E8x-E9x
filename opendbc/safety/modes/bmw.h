@@ -1,7 +1,6 @@
 #pragma once
 
-#include "../safety_declarations.h"
-static float interpolate(struct lookup_t xy, float x);
+#include "opendbc/safety/declarations.h"
 
 // CAN msgs we care about
 #define BMW_EngineAndBrake 0xA8U
@@ -38,10 +37,10 @@ static void bmw_rx_hook(const CANPacket_t *msg) {
   int addr = msg->addr;
   int bus = msg->bus;
 
-  if (addr == BMW_DynamicCruiseControlStatus) { // VO544 
+  if (addr == BMW_DynamicCruiseControlStatus) { // VO544
     bool cruise_engaged = (((msg->data[5] >> 3) & 0x1U) == 1U);
     pcm_cruise_check(cruise_engaged);
-  } else if (addr == BMW_CruiseControlStatus) { // VO540 
+  } else if (addr == BMW_CruiseControlStatus) { // VO540
     bool cruise_engaged = (((msg->data[1] >> 5) & 0x1U) == 1U);
     pcm_cruise_check(cruise_engaged);
   }
@@ -134,14 +133,14 @@ static bool bmw_tx_hook(const CANPacket_t *msg) {
   };
 
   bool tx = true;
-  
+
   // STEPPER_SERVO_CAN: BMW E90 torque control only
   if (addr == STEPPER_STEERING_COMMAND) {
     // Torque Control Mode:
     uint8_t steer_mode = (msg->data[1] >> 4) & 0b11u;
     if (steer_mode != 0x0U) {
       int8_t steer_torque = (int8_t)(msg->data[4]); // Nm / CAN_ACTUATOR_TQ_FAC
-      
+
       // BMW stepper servo: treat any non-zero torque as steer request
       int steer_req = (steer_torque != 0) ? 1 : 0;
       if (steer_torque_cmd_checks(steer_torque, steer_req, STEPPER_SERVO_LIMITS)) {
@@ -155,8 +154,8 @@ static bool bmw_tx_hook(const CANPacket_t *msg) {
 }
 
 static safety_config bmw_init(uint16_t param) {
-  UNUSED(param);
-  
+  SAFETY_UNUSED(param);
+
   static RxCheck bmw_rx_checks[] = {
     // Core safety: brake, gas, speed on Bus 0, steering torque on Bus 1 (same pattern as Toyota 0xaa, 0x260, 0x1D2, 0x226)
     {.msg = {{BMW_EngineAndBrake, BMW_PT_CAN, 8, .frequency = 100U,
@@ -166,11 +165,11 @@ static safety_config bmw_init(uint16_t param) {
     {.msg = {{BMW_Speed, BMW_PT_CAN, 8, .frequency = 50U,
               .ignore_checksum = true, .ignore_counter = true, .ignore_quality_flag = true}, { 0 }, { 0 }}},
     {.msg = {{BMW_DynamicCruiseControlStatus, BMW_PT_CAN, 8, .frequency = 5U,
-              .ignore_checksum = true, .ignore_counter = true, .ignore_quality_flag = true}, 
+              .ignore_checksum = true, .ignore_counter = true, .ignore_quality_flag = true},
              {BMW_CruiseControlStatus, BMW_PT_CAN, 8, .frequency = 5U,
               .ignore_checksum = true, .ignore_counter = true, .ignore_quality_flag = true},
              { 0 }}},
-    {.msg = {{STEPPER_STEERING_STATUS,  BMW_F_CAN, 8, .ignore_counter = true, .frequency = 100U, 
+    {.msg = {{STEPPER_STEERING_STATUS,  BMW_F_CAN, 8, .ignore_counter = true, .frequency = 100U,
               .ignore_quality_flag = true, .ignore_checksum = true},
              {STEPPER_STEERING_STATUS,  BMW_AUX_CAN, 8, .ignore_counter = true, .frequency = 100U,
               .ignore_quality_flag = true, .ignore_checksum = true},
@@ -190,8 +189,8 @@ static safety_config bmw_init(uint16_t param) {
   bmw_speed = 0.0f;
 
   safety_config ret = BUILD_SAFETY_CFG(bmw_rx_checks, BMW_TX_MSGS);
-  ret.disable_forwarding = true;   
-  
+  ret.disable_forwarding = true;
+
   return ret;
 }
 
@@ -199,9 +198,9 @@ const safety_hooks bmw_hooks = {
   .init = bmw_init,
   .rx = bmw_rx_hook,
   .tx = bmw_tx_hook,
-  .fwd = NULL,              
-  .get_counter = NULL,          
-  .get_checksum = NULL,         
-  .compute_checksum = NULL,     
-  .get_quality_flag_valid = NULL, 
+  .fwd = NULL,
+  .get_counter = NULL,
+  .get_checksum = NULL,
+  .compute_checksum = NULL,
+  .get_quality_flag_valid = NULL,
 };
