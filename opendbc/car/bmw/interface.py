@@ -206,6 +206,7 @@ class CarInterface(CarInterfaceBase):
     carlog.warning(f"BMW Debug: Configured BMW safety model (ID={structs.CarParams.SafetyModel.bmw}) for {ret.carFingerprint}")
 
     ret.steerControlType = structs.CarParams.SteerControlType.torque
+    ret.lateralTuning.torque.latAccelOffset = -0.34
     ret.steerActuatorDelay = 0.4
     ret.steerLimitTimer = 0.4
 
