@@ -206,11 +206,13 @@ class CarInterface(CarInterfaceBase):
     carlog.warning(f"BMW Debug: Configured BMW safety model (ID={structs.CarParams.SafetyModel.bmw}) for {ret.carFingerprint}")
 
     ret.steerControlType = structs.CarParams.SteerControlType.torque
-    ret.lateralTuning.torque.latAccelOffset = -0.34
     ret.steerActuatorDelay = 0.4
     ret.steerLimitTimer = 0.4
 
     CarInterfaceBase.configure_torque_tune(candidate, ret.lateralTuning, steering_angle_deadzone_deg=0.0)
+
+    # BMW-specific lateral acceleration offset (must be set AFTER configure_torque_tune)
+    ret.lateralTuning.torque.latAccelOffset = -0.34
 
     ret.longitudinalActuatorDelay = 0.6  # second
 
