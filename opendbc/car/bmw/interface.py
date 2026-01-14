@@ -43,7 +43,8 @@ class CarInterface(CarInterfaceBase):
     # BMW Variable Steer Ratio support
     # Enable for all BMW E90s based on route analysis showing 30% variation
     from opendbc.car.bmw.values import CAR
-    self.variable_steer_ratio_enabled = (CP.carFingerprint == CAR.BMW_E90)
+    #self.variable_steer_ratio_enabled = (CP.carFingerprint == CAR.BMW_E90)
+    self.variable_steer_ratio_enabled = False
     self.default_steer_ratio = CP.steerRatio  # Store default ratio from CarParams
 
 
@@ -211,8 +212,7 @@ class CarInterface(CarInterfaceBase):
 
     CarInterfaceBase.configure_torque_tune(candidate, ret.lateralTuning, steering_angle_deadzone_deg=0.0)
 
-    # BMW-specific lateral acceleration offset (must be set AFTER configure_torque_tune)
-    ret.lateralTuning.torque.latAccelOffset = -0.34
+    ret.lateralTuning.torque.latAccelOffset = 0.0
 
     ret.longitudinalActuatorDelay = 0.6  # second
 
