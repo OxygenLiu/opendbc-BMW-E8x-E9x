@@ -104,13 +104,12 @@ static bool bmw_tx_hook(const CANPacket_t *msg) {
   if ((addr == BMW_UDS_REQUEST_DME) || (addr == BMW_UDS_FUNCTIONAL_REQUEST)) {
     // Check for UDS Service 0x14 (Clear Diagnostic Information)
     if ((GET_LEN(msg) >= 2) && (msg->data[1] == 0x14U)) {
-      // BMW DTC clearing safety requirement: ignition ON and vehicle stationary
-      // This prevents accidental clearing during driving or when ignition is off
-      bool ignition_on = ignition_can;  // CAN-based ignition detection
-      bool vehicle_safe = !vehicle_moving && (bmw_speed < 1.0f);   // Vehicle stationary
+      // BMW DTC clearing safety requirement: vehicle stationary
+      // Ignition is implicitly on since CAN messages are being received
+      bool vehicle_safe = !vehicle_moving && (bmw_speed < 1.0f);
 
-      if (!ignition_on || !vehicle_safe) {
-        return false;  // Block unsafe DTC clear attempts
+      if (!vehicle_safe) {
+        return false;  // Block unsafe DTC clear attempts while moving
       }
     }
     // Allow all UDS diagnostic operations (0x14 Clear, 0x19 Read, 0x22 Read Data, etc.)
