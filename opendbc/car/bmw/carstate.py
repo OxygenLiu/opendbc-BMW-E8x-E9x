@@ -48,9 +48,8 @@ class CarState(CarStateBase):
     # Subscribe to radarState and liveDelay for velocity-difference-based T_FOLLOW scaling
     self.sm = messaging.SubMaster(['radarState', 'liveDelay'])
 
-    # FirstOrderFilter for lateral acceleration (fc=0.2Hz, matches 50Hz CAN rate)
-    # 0.2Hz cutoff provides good smoothing with minimal phase lag at driving frequencies
-    self.lateral_accel_filter = FirstOrderFilter(0.0, 1 / (2 * np.pi * 0.2), 0.02)
+    # FirstOrderFilter for lateral acceleration (fc=1.2Hz)
+    self.lateral_accel_filter = FirstOrderFilter(0.0, 1 / (2 * np.pi * 1.2), 0.02)
 
   def update(self, can_parsers) -> structs.CarState:
     cp_PT = can_parsers[Bus.pt]
