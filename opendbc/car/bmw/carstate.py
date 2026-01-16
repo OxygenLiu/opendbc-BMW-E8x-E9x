@@ -79,7 +79,7 @@ class CarState(CarStateBase):
     ret.vEgoCluster = ret.vEgo + CruiseSettings.CLUSTER_OFFSET * CV.KPH_TO_MS
     ret.standstill = not cp_PT.vl['Speed']["MovingForward"] and not cp_PT.vl['Speed']["MovingReverse"]
     ret.yawRate = cp_PT.vl['Speed']["YawRate"] * CV.DEG_TO_RAD
-    ret.lateralAccel = self.lateral_accel_filter.update(cp_PT.vl["Speed"]['LatlAcc'] * -1)  # BMW right positive, penpilot left positive
+    ret.lateralAccel = self.lateral_accel_filter.update(cp_PT.vl["Speed"]['LatlAcc']) # BMW uses same convention as openpilot, left positive, right negative
     ret.steeringRateDeg = cp_PT.vl["SteeringWheelAngle"]['SteeringSpeed']
     can_gear = int(cp_PT.vl["TransmissionDataDisplay"]['ShiftLeverPosition'])
     ret.gearShifter = self.parse_gear_shifter(self.shifter_values.get(can_gear, None))
