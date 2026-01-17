@@ -210,7 +210,7 @@ class CarInterface(CarInterfaceBase):
     ret.steerActuatorDelay = 0.4
     ret.steerLimitTimer = 0.4
 
-    CarInterfaceBase.configure_torque_tune(candidate, ret.lateralTuning, steering_angle_deadzone_deg=0.0)
+    CarInterfaceBase.configure_torque_tune(candidate, ret.lateralTuning, steering_angle_deadzone_deg=2.0)
 
     ret.lateralTuning.torque.latAccelOffset = 0.0
 
