@@ -110,7 +110,7 @@ class CarInterface(CarInterfaceBase):
 
   def get_variable_steer_ratio(self, steering_angle_deg, speed_ms):
     """
-    BMW E90 Variable Steer Ratio with linear interpolation, hysteresis, and speed adjustment
+    BMW E90 Variable Steer Ratio with linear interpolation, hysteresis
     Based on measured data from route 00000048--891b50d865 (59,629 samples)
     """
     abs_angle = abs(steering_angle_deg)
@@ -132,24 +132,13 @@ class CarInterface(CarInterfaceBase):
     self._last_abs_angle = abs_angle
 
     # Linear interpolation for smooth ratio transitions
-    # Define angle breakpoints and corresponding ratios
-    angle_breakpoints = [0, 10, 45, 90, 180]  # degrees
-    ratio_values = [22.0, 22.0, 21.7, 18.5, 16.8]  # corresponding ratios
+    angle_breakpoints = [0, 10, 45, 90, 180, 360]  # degrees
+    ratio_values = [22.0, 22.0, 21.7, 18.5, 16.8, 16.8]  # corresponding ratios
 
-    # Use linear interpolation for smooth transitions
     import numpy as np
-    base_ratio = float(np.interp(smoothed_angle, angle_breakpoints, ratio_values))
+    steer_ratio = float(np.interp(smoothed_angle, angle_breakpoints, ratio_values))
 
-    # Speed-dependent adjustment with linear interpolation
-    speed_kph = speed_ms * 3.6
-    speed_breakpoints = [0, 30, 60, 100, 200]  # km/h
-    speed_modifiers = [0.90, 0.90, 0.95, 1.0, 1.05]  # corresponding modifiers
-    speed_modifier = float(np.interp(speed_kph, speed_breakpoints, speed_modifiers))
-
-    # Apply speed modification
-    adjusted_ratio = base_ratio * speed_modifier
-
-    return adjusted_ratio
+    return steer_ratio
 
 
   def get_current_variable_steer_ratio(self):
