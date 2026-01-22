@@ -232,42 +232,16 @@ class CarInterface(CarInterfaceBase):
     if ret.flags & BmwFlags.NORMAL_CRUISE_CONTROL:
       ret.minEnableSpeed = 30. * CV.KPH_TO_MS
 
-    # BMW longitudinal personality: Speed-dependent T_FOLLOW lookup tables
-    # Low speed: Optimized for 30 kph minEnableSpeed threshold safety
-    # High speed: Compensates for DCC braking limitation (-1.2 m/s²) and vision detection range (~100m)
-    # Lookup tables defined in bmw/values.py with simple interpolation
-    ret.longitudinalPersonalityParams.useCustomLookup = True
-
     ret.safetyConfigs = [get_safety_config(structs.CarParams.SafetyModel.bmw)]
     ret.safetyConfigs[0].safetyParam = 0
-
-    # BMW Debug: Log safety configuration
-    from opendbc.car.carlog import carlog
-    carlog.warning(f"BMW Debug: Configured BMW safety model (ID={structs.CarParams.SafetyModel.bmw}) for {ret.carFingerprint}")
 
     ret.steerControlType = structs.CarParams.SteerControlType.torque
     ret.steerActuatorDelay = 0.4
     ret.steerLimitTimer = 0.4
 
-    CarInterfaceBase.configure_torque_tune(candidate, ret.lateralTuning, steering_angle_deadzone_deg=0.0)
+    CarInterfaceBase.configure_torque_tune(candidate, ret.lateralTuning, steering_angle_deadzone_deg=2.0)
 
-    # BMW E-series lateral tuning optimized for v0.10.1 PID architecture
-    ret.lateralTuning.torque.kp = 6.0 / CarControllerParams.STEER_MAX  # 0.5
-    ret.lateralTuning.torque.ki = 3.0 / CarControllerParams.STEER_MAX  # 0.25
-    ret.lateralTuning.torque.kd = 1.5 / CarControllerParams.STEER_MAX  # 0.125 (derivative for damping)
-
-    # BMW cruise stalk command processing delay - Two-step tuning strategy:
-    # Phase 1 (current): Fixed 0.6s delay for validating DCC plus/minus mapping logic
-    # Phase 2 (future): Enable lagd.py adaptive learning with stricter quality filtering
-    #                   (only learn when cruise commands actually sent, outside buffer zone)
-    # This delay is used by get_accel_from_plan(action_t = delay + DT_MDL) for velocity extraction
     ret.longitudinalActuatorDelay = 0.6  # Fixed delay for Phase 1 validation
-
-    # Revolutionary ModelV2 velocity-based DCC control eliminates need for PID tuning
-    # Direct velocity trajectory mapping provides superior control without PID complexity
-
-    # ModelV2 direct velocity extraction uses index 8 (0.625s) for BMW's 0.6s actuator delay
-    # Future enhancement: Calculate dynamic index based on ret.longitudinalActuatorDelay
 
     ret.centerToFront = ret.wheelbase * 0.44
 
