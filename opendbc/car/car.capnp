@@ -171,6 +171,8 @@ struct CarState {
   vCruiseCluster @54 :Float32; # set speed to display in the UI
 
   yawRate @22 :Float32;     # best estimate of yaw rate
+  lateralAccel @63 :Float32; # Direct CAN measurement, m/s2
+
   standstill @18 :Bool;
   wheelSpeeds @2 :WheelSpeeds;
 

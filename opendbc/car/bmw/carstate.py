@@ -2,6 +2,7 @@ import numpy as np
 from opendbc.can import CANDefine, CANParser
 from opendbc.car import Bus, structs, create_button_events
 from opendbc.car.common.conversions import Conversions as CV
+from opendbc.car.common.filter_simple import FirstOrderFilter
 from opendbc.car.interfaces import CarStateBase
 from opendbc.car.bmw.values import DBC, CanBus, BmwFlags, CruiseSettings
 import cereal.messaging as messaging
@@ -47,6 +48,9 @@ class CarState(CarStateBase):
     # Subscribe to radarState and liveDelay for velocity-difference-based T_FOLLOW scaling
     self.sm = messaging.SubMaster(['radarState', 'liveDelay'])
 
+    # FirstOrderFilter for lateral acceleration (fc=1.2Hz)
+    self.lateral_accel_filter = FirstOrderFilter(0.0, 1 / (2 * np.pi * 1.2), 0.02)
+
   def update(self, can_parsers) -> structs.CarState:
     cp_PT = can_parsers[Bus.pt]
     cp_F = can_parsers[Bus.body]
@@ -74,6 +78,7 @@ class CarState(CarStateBase):
     ret.vEgoCluster = ret.vEgo + CruiseSettings.CLUSTER_OFFSET * CV.KPH_TO_MS
     ret.standstill = not cp_PT.vl['Speed']["MovingForward"] and not cp_PT.vl['Speed']["MovingReverse"]
     ret.yawRate = cp_PT.vl['Speed']["YawRate"] * CV.DEG_TO_RAD
+    ret.lateralAccel = self.lateral_accel_filter.update(cp_PT.vl["Speed"]['LatlAcc'])
     ret.steeringRateDeg = cp_PT.vl["SteeringWheelAngle"]['SteeringSpeed']
     can_gear = int(cp_PT.vl["TransmissionDataDisplay"]['ShiftLeverPosition'])
     ret.gearShifter = self.parse_gear_shifter(self.shifter_values.get(can_gear, None))
