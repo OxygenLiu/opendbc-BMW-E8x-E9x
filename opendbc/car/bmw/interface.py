@@ -67,40 +67,6 @@ class CarInterface(CarInterfaceBase):
     hold_torque = np.interp(desired_angle, angle_bp, hold_torque_v)
     return hold_torque # todo add speed component
 
-  @staticmethod
-  def get_modelv2_velocity_index(actuator_delay_s):
-    """
-    Calculate optimal ModelV2 velocity index for actuator delay compensation
-
-    Args:
-        actuator_delay_s: longitudinalActuatorDelay in seconds
-
-    Returns:
-        int: ModelV2 velocity array index for actuator delay compensation
-    """
-    from selfdrive.modeld.constants import index_function, ModelConstants
-
-    if actuator_delay_s <= 0:
-        return 0
-
-    # Generate ModelV2 time indices
-    T_IDXS = [index_function(idx, max_val=10.0) for idx in range(ModelConstants.IDX_N)]
-
-    if actuator_delay_s > T_IDXS[-1]:
-        return len(T_IDXS) - 1
-
-    # Find closest time index to actuator delay
-    best_idx = 0
-    min_error = float('inf')
-
-    for i, t in enumerate(T_IDXS):
-        error = abs(t - actuator_delay_s)
-        if error < min_error:
-            min_error = error
-            best_idx = i
-
-    return best_idx
-
   def get_steer_feedforward_function(self):
     if self.CP.flags & BmwFlags.SERVOTRONIC:
       return self.get_steer_feedforward_servotronic
@@ -133,23 +99,14 @@ class CarInterface(CarInterfaceBase):
 
     # Linear interpolation for smooth ratio transitions
     # Define angle breakpoints and corresponding ratios
-    angle_breakpoints = [0, 10, 45, 90, 180]  # degrees
-    ratio_values = [22.0, 22.0, 21.7, 18.5, 16.8]  # corresponding ratios
+    angle_breakpoints = [0, 10, 180, 360]  # degrees
+    ratio_values = [20.0, 20.0, 17.0, 17.0]  # corresponding ratios
 
     # Use linear interpolation for smooth transitions
     import numpy as np
-    base_ratio = float(np.interp(smoothed_angle, angle_breakpoints, ratio_values))
+    ratio = float(np.interp(smoothed_angle, angle_breakpoints, ratio_values))
 
-    # Speed-dependent adjustment with linear interpolation
-    speed_kph = speed_ms * 3.6
-    speed_breakpoints = [0, 30, 60, 100, 200]  # km/h
-    speed_modifiers = [0.90, 0.90, 0.95, 1.0, 1.05]  # corresponding modifiers
-    speed_modifier = float(np.interp(speed_kph, speed_breakpoints, speed_modifiers))
-
-    # Apply speed modification
-    adjusted_ratio = base_ratio * speed_modifier
-
-    return adjusted_ratio
+    return ratio
 
 
   def get_current_variable_steer_ratio(self):
@@ -232,18 +189,8 @@ class CarInterface(CarInterfaceBase):
     if ret.flags & BmwFlags.NORMAL_CRUISE_CONTROL:
       ret.minEnableSpeed = 30. * CV.KPH_TO_MS
 
-    # BMW longitudinal personality: Speed-dependent T_FOLLOW lookup tables
-    # Low speed: Optimized for 30 kph minEnableSpeed threshold safety
-    # High speed: Compensates for DCC braking limitation (-1.2 m/s²) and vision detection range (~100m)
-    # Lookup tables defined in bmw/values.py with simple interpolation
-    ret.longitudinalPersonalityParams.useCustomLookup = True
-
     ret.safetyConfigs = [get_safety_config(structs.CarParams.SafetyModel.bmw)]
     ret.safetyConfigs[0].safetyParam = 0
-
-    # BMW Debug: Log safety configuration
-    from opendbc.car.carlog import carlog
-    carlog.warning(f"BMW Debug: Configured BMW safety model (ID={structs.CarParams.SafetyModel.bmw}) for {ret.carFingerprint}")
 
     ret.steerControlType = structs.CarParams.SteerControlType.torque
     ret.steerActuatorDelay = 0.4
@@ -256,18 +203,7 @@ class CarInterface(CarInterfaceBase):
     ret.lateralTuning.torque.ki = 3.0 / CarControllerParams.STEER_MAX  # 0.25
     ret.lateralTuning.torque.kd = 1.5 / CarControllerParams.STEER_MAX  # 0.125 (derivative for damping)
 
-    # BMW cruise stalk command processing delay - Two-step tuning strategy:
-    # Phase 1 (current): Fixed 0.6s delay for validating DCC plus/minus mapping logic
-    # Phase 2 (future): Enable lagd.py adaptive learning with stricter quality filtering
-    #                   (only learn when cruise commands actually sent, outside buffer zone)
-    # This delay is used by get_accel_from_plan(action_t = delay + DT_MDL) for velocity extraction
     ret.longitudinalActuatorDelay = 0.6  # Fixed delay for Phase 1 validation
-
-    # Revolutionary ModelV2 velocity-based DCC control eliminates need for PID tuning
-    # Direct velocity trajectory mapping provides superior control without PID complexity
-
-    # ModelV2 direct velocity extraction uses index 8 (0.625s) for BMW's 0.6s actuator delay
-    # Future enhancement: Calculate dynamic index based on ret.longitudinalActuatorDelay
 
     ret.centerToFront = ret.wheelbase * 0.44
 
