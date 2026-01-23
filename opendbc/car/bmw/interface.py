@@ -249,7 +249,7 @@ class CarInterface(CarInterfaceBase):
     ret.steerActuatorDelay = 0.4
     ret.steerLimitTimer = 0.4
 
-    CarInterfaceBase.configure_torque_tune(candidate, ret.lateralTuning, steering_angle_deadzone_deg=0.0)
+    CarInterfaceBase.configure_torque_tune(candidate, ret.lateralTuning, steering_angle_deadzone_deg=2.0)
 
     # BMW E-series lateral tuning optimized for v0.10.1 PID architecture
     ret.lateralTuning.torque.kp = 6.0 / CarControllerParams.STEER_MAX  # 0.5
