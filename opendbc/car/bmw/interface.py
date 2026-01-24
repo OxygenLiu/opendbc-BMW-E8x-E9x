@@ -99,8 +99,8 @@ class CarInterface(CarInterfaceBase):
 
     # Linear interpolation for smooth ratio transitions
     # Define angle breakpoints and corresponding ratios
-    angle_breakpoints = [0, 10, 180, 360]  # degrees
-    ratio_values = [20.0, 20.0, 17.0, 17.0]  # corresponding ratios
+    angle_breakpoints = [0, 10, 45, 90, 180, 360]  # degrees
+    ratio_values = [18.5, 18.5, 16.5, 14.5, 14.5, 14.5]  # corresponding ratios
 
     # Use linear interpolation for smooth transitions
     import numpy as np
