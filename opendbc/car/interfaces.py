@@ -26,6 +26,15 @@ ACCEL_MAX = 2.0
 ACCEL_MIN = -3.5
 LAT_ACCEL_LIMIT = 2.5  # Default lateral acceleration limit for curve speed control (m/s²) - EU guideline ISO 11270
 
+# Friction circle constraint: total acceleration limited by tire grip
+# Typical tire-road friction coefficient μ = 0.8-1.0 on dry asphalt
+# Using conservative μ = 0.4 gives a_total_max = 0.4 * g ≈ 4.0 m/s²
+A_TOTAL_MAX = 4.0  # m/s², conservative friction circle limit
+
+# Steering curvature clipping limits (EU guidelines)
+MAX_LATERAL_ACCEL_NO_ROLL = 3.0  # m/s², max lateral accel before roll compensation
+MAX_LATERAL_JERK = 3.0  # m/s³, max lateral jerk for curvature rate limiting
+
 TORQUE_PARAMS_PATH = os.path.join(BASEDIR, 'torque_data/params.toml')
 TORQUE_OVERRIDE_PATH = os.path.join(BASEDIR, 'torque_data/override.toml')
 TORQUE_SUBSTITUTE_PATH = os.path.join(BASEDIR, 'torque_data/substitute.toml')
