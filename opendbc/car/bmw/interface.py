@@ -200,7 +200,7 @@ class CarInterface(CarInterfaceBase):
     ret.lateralTuning.torque.ki = 3.0 / CarControllerParams.STEER_MAX  # 0.25
     ret.lateralTuning.torque.kd = 1.5 / CarControllerParams.STEER_MAX  # 0.125 (derivative for damping)
 
-    ret.longitudinalActuatorDelay = 0.6  # Fixed delay for Phase 1 validation
+    ret.longitudinalActuatorDelay = 0.3
 
     ret.centerToFront = ret.wheelbase * 0.44
 
