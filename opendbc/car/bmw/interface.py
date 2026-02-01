@@ -43,7 +43,8 @@ class CarInterface(CarInterfaceBase):
     # BMW Variable Steer Ratio support
     # Enable for all BMW E90s based on route analysis showing 30% variation
     from opendbc.car.bmw.values import CAR
-    self.variable_steer_ratio_enabled = (CP.carFingerprint == CAR.BMW_E90)
+    #self.variable_steer_ratio_enabled = (CP.carFingerprint == CAR.BMW_E90)
+    self.variable_steer_ratio_enabled = False
     self.default_steer_ratio = CP.steerRatio  # Store default ratio from CarParams
 
 
