@@ -5,9 +5,7 @@ from opendbc.car.bmw.values import CarControllerParams, CanBus, BmwFlags, Cruise
 from opendbc.car.interfaces import CarControllerBase
 from opendbc.can import CANPacker
 from opendbc.car.common.conversions import Conversions as CV
-import pickle
-import numpy as np
-from pathlib import Path
+from opendbc.car.common.filter_simple import FirstOrderFilter
 
 
 # DO NOT CHANGE: Cruise control step size
@@ -23,8 +21,7 @@ CRUISE_STALK_HOLD_TICK_STOCK = 0.025  # 40Hz - stock held stalk
 # Openpilot DCC Emulation - Frequency-based command rates
 # Different modes use different frequencies for comfort and responsiveness
 CRUISE_STALK_PLUS1_SINGLE_TICK = 0.2    # 5Hz - improved acceleration response (was 2Hz)
-CRUISE_STALK_MINUS5_HOLD_TICK = 0.01    # 100Hz - emergency braking (maximum rate)
-CRUISE_STALK_MINUS1_HOLD_TICK = 0.025   # 40Hz - moderate braking (held)
+CRUISE_STALK_MINUS1_HOLD_TICK = 0.025   # 40Hz - moderate/heavy braking (held)
 CRUISE_STALK_MINUS1_SINGLE_TICK = 0.05  # 20Hz - cruise adjustment (single presses)
 
 # BMW DCC Specifications (ideal/theoretical - see DCC_Methodology_BMW_vs_Openpilot.md)
@@ -64,24 +61,14 @@ class CarController(CarControllerBase):
 
     self.packer = CANPacker(dbc_name[Bus.pt])
 
-    # Load learned DCC lookup table (data-driven from 795 real braking sequences)
-    # Maps: MPC accel → (frequency_hz, num_ticks) for optimal minus1 braking
-    # See: ~/driving_data/docs/dcc_mapping/DCC_Learned_Table_Integration.md
-    table_path = Path(__file__).parent / "dcc_learned_table.pkl"
-    try:
-      with open(table_path, 'rb') as f:
-        self.dcc_table = pickle.load(f)
-      print(f"✅ Loaded DCC learned table: {len(self.dcc_table['accel_grid'])} accel points")
-      self.dcc_fallback_mode = False
-    except FileNotFoundError:
-      print(f"⚠️  DCC learned table not found at {table_path}, using fallback logic")
-      self.dcc_table = None
-      self.dcc_fallback_mode = True
-
     # DCC tick-based sequence state tracking
     self.dcc_ticks_remaining = 0  # Number of minus1 ticks left in current sequence
-    self.dcc_frequency = 40.0  # Hz - frequency for current sequence
     self.dcc_last_tick_time = 0  # Timestamp of last tick sent
+
+    # Filtered MPC accel for braking frequency selection (prevents threshold flip-flop)
+    # RC=0.5s eliminates all rapid flip-flops at -0.3/-0.8 thresholds while
+    # tracking real braking ramps with negligible delay
+    self.accel_filter = FirstOrderFilter(0.0, 0.5, DT_CTRL)
 
     # DCC acceleration control - direct setpoint adjustment
     self.last_accel_time = 0  # Timestamp of last plus1 command
@@ -107,8 +94,8 @@ class CarController(CarControllerBase):
 
     v_error = v_target - v_current  # Velocity error using delay-compensated target
 
-    # Acceleration command from planner - used for braking intensity in learned DCC table
     accel = actuators.accel
+    accel_filtered = self.accel_filter.update(accel)
 
     # detect incoming CruiseControlStalk message by observing counter change (message arrives at only 5Hz when nothing pressed)
     if CS.cruise_stalk_counter != self.rx_cruise_stalk_counter_last:
@@ -166,86 +153,74 @@ class CarController(CarControllerBase):
           cruise_cmd(CruiseStalk.plus1, CRUISE_STALK_PLUS1_SINGLE_TICK)
           self.dcc_ticks_remaining = 0  # Cancel any pending braking sequence
         else:
-          # *** BMW DCC Learned Lookup Table Strategy ***
-          # Data-driven control based on 795 real minus1 braking sequences
-          # Maps: MPC accel → (frequency_hz, num_ticks) that achieved closest actual deceleration
+          # *** BMW DCC Setpoint Control Strategy ***
+          # v_error: velocity error (v_target - v_current)
+          # accel: MPC acceleration command (m/s²) - controls braking frequency
           #
-          # v_error: velocity error relative to target (v_target - v_current)
-          # accel: MPC acceleration command (m/s²) - used for table lookup
-          #
-          # BRAKING: Tick-limited sequences prevent setpoint runaway (max 8 km/h change)
-          # ACCELERATION: Single plus1 commands accumulate to target speed
-          #
-          # LEARNED PERFORMANCE (from real data):
-          # - 100Hz × 8 ticks: -0.736 desired → -1.099 actual m/s² (49 samples)
-          # - 40Hz × 2 ticks:  -0.665 desired → -0.671 actual m/s² (3 samples)
-          # - 20Hz × 1 tick:   -0.408 desired → -0.455 actual m/s² (184 samples)
-          # - 10Hz × 1 tick:   -0.406 desired → -0.433 actual m/s² (365 samples)
+          # ACCELERATION: plus5/plus1 commands raise setpoint toward target
+          # BRAKING: minus1 commands at accel-based frequency lower setpoint
+          # DEADBAND: |v_error| <= 1 km/h → coast, no commands
 
           current_time = now_nanos / 1e9
 
+          # PRE-EMPTIVE SETPOINT MAINTENANCE: When MPC requests acceleration,
+          # immediately cancel any in-progress braking sequence. This eliminates
+          # the lag at braking→acceleration transitions where the setpoint stays
+          # low while the lead vehicle is already pulling away.
+          if accel > 0 and self.dcc_ticks_remaining > 0:
+            self.dcc_ticks_remaining = 0
+
           # ACCELERATION: v_error > 1.0 km/h and MPC requests acceleration
-          # Strategy: Send plus1 commands at 5Hz with speed-dependent setpoint buffer
-          # Phase 3: Speed-dependent buffer scaling to prevent high-speed overshoot
-          #   - 70 km/h: 2.5 km/h buffer (proven sweet spot from Phase 2)
-          #   - 140 km/h: 0.0 km/h buffer (no overshoot at very high speeds)
-          #   - Linear interpolation between these points
-          #   - CRITICAL: Smaller buffer at high speeds prevents overshoot
+          # Strategy: Send plus1/plus5 commands with speed-dependent setpoint buffer
+          #   - plus5 for large deficits (>= 5 km/h) for rapid setpoint recovery
+          #   - plus1 at 5Hz for fine-grained catch-up
+          #   - Speed-dependent buffer allows setpoint overshoot for aggressive acceleration
           v_error_setpoint = v_target - CS.out.cruiseState.speed  # Setpoint vs target error
 
           # Calculate speed-dependent buffer (in km/h)
           v_ego_kph = CS.out.vEgo * 3.6
           if v_ego_kph <= 120.0:
-            # Linear interpolation: 3.0 km/h @ 0 km/h → 0.0 km/h @ 120 km/h
-            buffer_kph =  (1.0 - v_ego_kph / 120.0) * 3.0
+            # Linear interpolation: 6.0 km/h @ 0 km/h → 0.0 km/h @ 120 km/h
+            buffer_kph = (1.0 - v_ego_kph / 120.0) * 6.0
           else:
             # above 120km/h, 0.0 km/h
             buffer_kph = 0.0
 
           if v_error > 1.0/3.6 and accel > 0 and v_error_setpoint > -buffer_kph/3.6:
-            # Allow setpoint to exceed v_target by speed-dependent buffer (2.5→0.0 km/h)
-            # Zero buffer at 140+ km/h prevents any overshoot at very high speeds
-            # Calculate how many km/h to increase setpoint (rounded)
             v_error_kmh = v_error * 3.6
             setpoint_increase_needed = int(round(v_error_kmh))
 
-            # Send plus1 commands at 5Hz (CRUISE_STALK_PLUS1_SINGLE_TICK = 0.2s)
-            # Each plus1 command increases setpoint by 1 km/h
             time_since_last_accel = current_time - self.last_accel_time
 
             if time_since_last_accel >= CRUISE_STALK_PLUS1_SINGLE_TICK and setpoint_increase_needed > 0:
-              cruise_cmd(CruiseStalk.plus1, CRUISE_STALK_PLUS1_SINGLE_TICK)
+              # Use plus5 for large deficits to rapidly recover setpoint after braking
+              if setpoint_increase_needed >= 5:
+                cruise_cmd(CruiseStalk.plus5, CRUISE_STALK_PLUS1_SINGLE_TICK)
+              else:
+                cruise_cmd(CruiseStalk.plus1, CRUISE_STALK_PLUS1_SINGLE_TICK)
               self.last_accel_time = current_time
               self.dcc_ticks_remaining = 0  # Cancel any pending braking
 
-          # BRAKING: v_error < -1.0 km/h (tightened from 1.5 for faster response)
+          # BRAKING: v_error < -1.0 km/h
+          # Strategy: minus1 commands with accel-based frequency, v_error-based tick count
+          #   - Ticks = setpoint km/h to drop (1 tick = 1 km/h)
+          #   - Frequency from MPC accel magnitude (heavier braking = faster commands)
           elif v_error < -1.0/3.6 and accel < 0 and CS.out.cruiseState.speed > self.min_cruise_setpoint:
+            # Start new braking sequence if previous one completed
+            if self.dcc_ticks_remaining == 0:
+              self.dcc_ticks_remaining = int(round(-v_error * 3.6))
+              self.dcc_last_tick_time = current_time
 
-            if self.dcc_table is not None:
-              # Use learned lookup table
-              # Start new braking sequence if previous one completed
-              if self.dcc_ticks_remaining == 0:
-                # Query learned table for optimal (frequency, ticks)
-                idx = np.argmin(np.abs(self.dcc_table['accel_grid'] - accel))
-                self.dcc_frequency = self.dcc_table['frequency_array'][idx]
-                self.dcc_ticks_remaining = int(self.dcc_table['num_ticks_array'][idx])
-                self.dcc_last_tick_time = current_time
-
-              # Execute tick-based sequence
-              if self.dcc_ticks_remaining > 0:
-                tick_interval = 1.0 / self.dcc_frequency
-                if current_time - self.dcc_last_tick_time >= tick_interval:
-                  cruise_cmd(CruiseStalk.minus1, tick_interval)
-                  self.dcc_ticks_remaining -= 1
-                  self.dcc_last_tick_time = current_time
-            else:
-              # Fallback: simple threshold-based control if table not loaded
-              if accel < -0.8:
-                cruise_cmd(CruiseStalk.minus1, CRUISE_STALK_MINUS5_HOLD_TICK)
-              elif accel < -0.3:
-                cruise_cmd(CruiseStalk.minus1, CRUISE_STALK_MINUS1_HOLD_TICK)
+            if self.dcc_ticks_remaining > 0:
+              # Frequency based on filtered accel magnitude (prevents threshold flip-flop)
+              if accel_filtered < -0.3:
+                tick_interval = CRUISE_STALK_MINUS1_HOLD_TICK   # 40Hz - moderate/heavy braking
               else:
-                cruise_cmd(CruiseStalk.minus1, CRUISE_STALK_MINUS1_SINGLE_TICK)
+                tick_interval = CRUISE_STALK_MINUS1_SINGLE_TICK # 20Hz - light braking
+              if current_time - self.dcc_last_tick_time >= tick_interval:
+                cruise_cmd(CruiseStalk.minus1, tick_interval)
+                self.dcc_ticks_remaining -= 1
+                self.dcc_last_tick_time = current_time
 
           # DEADBAND: |v_error| <= 1.0 km/h - coast, no commands
           else:
@@ -289,7 +264,6 @@ class CarController(CarControllerBase):
     new_actuators.torqueOutputCan = self.apply_torque_last
 
     new_actuators.speed = v_target
-    new_actuators.dccFallbackMode = self.dcc_fallback_mode
 
     self.frame += 1
     return new_actuators, can_sends
