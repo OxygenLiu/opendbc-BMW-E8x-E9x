@@ -207,7 +207,11 @@ class CarController(CarControllerBase):
           #   - Tick system prevents over-braking regardless of rate
           elif v_error < -1.0/3.6 and accel < 0 and CS.out.cruiseState.speed > self.min_cruise_setpoint:
             if self.dcc_ticks_remaining == 0:
-              self.dcc_ticks_remaining = int(round(-v_error * 3.6))
+              # Clamp ticks to not drop setpoint below min_cruise_setpoint floor
+              # This prevents overshoot due to 5Hz CAN feedback delay on cruiseState.speed
+              v_error_ticks = int(round(-v_error * 3.6))
+              max_ticks = max(0, int((CS.out.cruiseState.speed - self.min_cruise_setpoint) * 3.6))
+              self.dcc_ticks_remaining = min(v_error_ticks, max_ticks)
               self.dcc_last_tick_time = current_time
 
             if self.dcc_ticks_remaining > 0:
