@@ -21,8 +21,8 @@ CRUISE_STALK_HOLD_TICK_STOCK = 0.025  # 40Hz - stock held stalk
 # Different modes use different frequencies for comfort and responsiveness
 CRUISE_STALK_PLUS1_SINGLE_TICK = 0.2    # 5Hz - improved acceleration response (was 2Hz)
 CRUISE_STALK_PLUS1_HOLD_TICK = 0.025    # 40Hz - rapid acceleration for large deficits (held)
-CRUISE_STALK_MINUS1_HOLD_TICK = 0.025   # 40Hz - moderate/heavy braking (held)
-CRUISE_STALK_MINUS1_SINGLE_TICK = 0.05  # 20Hz - cruise adjustment (single presses)
+CRUISE_STALK_MINUS5_HOLD_TICK = 0.025   # 40Hz - emergency braking (minus5 held)
+CRUISE_STALK_MINUS1_HOLD_TICK = 0.025   # 40Hz - comfort braking (minus1 held)
 
 # BMW DCC Specifications (ideal/theoretical - see DCC_Methodology_BMW_vs_Openpilot.md)
 # These are BMW's published specs measured to 80-90% of setpoint (transient phase only)
@@ -187,31 +187,32 @@ class CarController(CarControllerBase):
 
             if time_since_last_accel >= CRUISE_STALK_PLUS1_SINGLE_TICK and setpoint_increase_needed > 0:
               # Use hold rate (40Hz) for large deficits to rapidly recover setpoint
-              if setpoint_increase_needed >= 5:
+              if setpoint_increase_needed >= 3:
                 cruise_cmd(CruiseStalk.plus1, CRUISE_STALK_PLUS1_HOLD_TICK)
               else:
                 cruise_cmd(CruiseStalk.plus1, CRUISE_STALK_PLUS1_SINGLE_TICK)
               self.last_accel_time = current_time
               self.dcc_ticks_remaining = 0  # Cancel any pending braking
 
+          # EMERGENCY BRAKING: v_error < -10 km/h
+          # Strategy: minus5 held continuously — bypasses tick counting entirely
+          # BMW DCC decelerates at -0.784 m/s² with minus5 (76% harder than minus1)
+          elif -v_error * 3.6 >= 10.0 and accel < 0 and CS.out.cruiseState.speed > self.min_cruise_setpoint:
+            self.dcc_ticks_remaining = 0  # Bypass tick system
+            cruise_cmd(CruiseStalk.minus5, CRUISE_STALK_MINUS5_HOLD_TICK)
+
           # BRAKING: v_error < -1.0 km/h
-          # Strategy: minus1 commands with v_error-based tick count and frequency
+          # Strategy: minus1 held at 40Hz with v_error-based tick count
           #   - Ticks = setpoint km/h to drop (1 tick = 1 km/h)
-          #   - Hold rate (40Hz) for large deficits (>= 5 km/h), single (20Hz) otherwise
+          #   - Tick system prevents over-braking regardless of rate
           elif v_error < -1.0/3.6 and accel < 0 and CS.out.cruiseState.speed > self.min_cruise_setpoint:
-            # Start new braking sequence if previous one completed
             if self.dcc_ticks_remaining == 0:
               self.dcc_ticks_remaining = int(round(-v_error * 3.6))
               self.dcc_last_tick_time = current_time
 
             if self.dcc_ticks_remaining > 0:
-              # Frequency based on v_error magnitude
-              if -v_error * 3.6 >= 5.0:
-                tick_interval = CRUISE_STALK_MINUS1_HOLD_TICK   # 40Hz - large deficit (>= 5 km/h)
-              else:
-                tick_interval = CRUISE_STALK_MINUS1_SINGLE_TICK # 20Hz - small deficit
-              if current_time - self.dcc_last_tick_time >= tick_interval:
-                cruise_cmd(CruiseStalk.minus1, tick_interval)
+              if current_time - self.dcc_last_tick_time >= CRUISE_STALK_MINUS1_HOLD_TICK:
+                cruise_cmd(CruiseStalk.minus1, CRUISE_STALK_MINUS1_HOLD_TICK)
                 self.dcc_ticks_remaining -= 1
                 self.dcc_last_tick_time = current_time
 
