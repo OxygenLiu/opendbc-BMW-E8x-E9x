@@ -21,19 +21,16 @@ CRUISE_STALK_HOLD_TICK_STOCK = 0.025  # 40Hz - stock held stalk
 # Different modes use different frequencies for comfort and responsiveness
 CRUISE_STALK_PLUS1_SINGLE_TICK = 0.2    # 5Hz - improved acceleration response (was 2Hz)
 CRUISE_STALK_PLUS1_HOLD_TICK = 0.025    # 40Hz - rapid acceleration for large deficits (held)
-CRUISE_STALK_MINUS5_HOLD_TICK = 0.025   # 40Hz - emergency braking (minus5 held)
-CRUISE_STALK_MINUS1_HOLD_TICK = 0.025   # 40Hz - comfort braking (minus1 held)
+CRUISE_STALK_MINUS1_HOLD_TICK = 0.025   # 40Hz - braking (minus1 held)
 
 # BMW DCC Specifications (ideal/theoretical - see DCC_Methodology_BMW_vs_Openpilot.md)
 # These are BMW's published specs measured to 80-90% of setpoint (transient phase only)
-# Plus1 held: 0.4 m/s², Plus5 held: 1.2 m/s²
-# Minus1 held: -0.6 m/s², Minus5 held: -1.2 m/s²
+# Plus1 held: 0.4 m/s², Minus1 held: -0.6 m/s²
 #
 # Measured Real-World Performance (full settling to 100% of setpoint)
 # Route: 000000f1--7fed5392b6 (71 segments, Normal transmission mode)
 # Plus1 held: 0.208 m/s² (52% of BMW spec - real-world conditions)
 # Minus1 held: -0.445 m/s² (74% of BMW spec)
-# Minus5 held: -0.784 m/s² (65% of BMW spec)
 # Our measurements include complete settling phase, more suitable for velocity control
 
 
@@ -193,13 +190,6 @@ class CarController(CarControllerBase):
                 cruise_cmd(CruiseStalk.plus1, CRUISE_STALK_PLUS1_SINGLE_TICK)
               self.last_accel_time = current_time
               self.dcc_ticks_remaining = 0  # Cancel any pending braking
-
-          # EMERGENCY BRAKING: v_error < -10 km/h
-          # Strategy: minus5 held continuously — bypasses tick counting entirely
-          # BMW DCC decelerates at -0.784 m/s² with minus5 (76% harder than minus1)
-          elif -v_error * 3.6 >= 10.0 and accel < 0 and CS.out.cruiseState.speed > self.min_cruise_setpoint:
-            self.dcc_ticks_remaining = 0  # Bypass tick system
-            cruise_cmd(CruiseStalk.minus5, CRUISE_STALK_MINUS5_HOLD_TICK)
 
           # BRAKING: v_error < -1.0 km/h
           # Strategy: minus1 held at 40Hz with v_error-based tick count
