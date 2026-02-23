@@ -196,11 +196,6 @@ class CarInterface(CarInterfaceBase):
 
     CarInterfaceBase.configure_torque_tune(candidate, ret.lateralTuning, steering_angle_deadzone_deg=0.0)
 
-    # BMW E-series lateral tuning optimized for v0.10.1 PID architecture
-    ret.lateralTuning.torque.kp = 0.8
-    ret.lateralTuning.torque.ki = 0.15
-    ret.lateralTuning.torque.kd = 0.0
-
     ret.longitudinalActuatorDelay = 0.3
 
     ret.centerToFront = ret.wheelbase * 0.44

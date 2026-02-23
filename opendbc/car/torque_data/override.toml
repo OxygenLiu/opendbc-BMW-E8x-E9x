@@ -1,5 +1,8 @@
 legend = ["LAT_ACCEL_FACTOR", "MAX_LAT_ACCEL_MEASURED", "FRICTION"]
 ### angle control
+# BMW uses stepper servo (angle control)
+"BMW_E82" = [nan, 1.5, nan]
+"BMW_E90" = [nan, 1.5, nan]
 # Nissan appears to have torque
 "NISSAN_XTRAIL" = [nan, 1.5, nan]
 "NISSAN_ALTIMA" = [nan, 1.5, nan]
