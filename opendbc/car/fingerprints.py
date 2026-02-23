@@ -1,4 +1,5 @@
 from opendbc.car.interfaces import get_interface_attr
+from opendbc.car.bmw.values import CAR as BMW
 from opendbc.car.body.values import CAR as BODY
 from opendbc.car.chrysler.values import CAR as CHRYSLER
 from opendbc.car.ford.values import CAR as FORD
@@ -333,6 +334,9 @@ MIGRATION = {
   "SKODA SCALA 1ST GEN": VW.SKODA_KAMIQ_MK1,
   "SKODA_SCALA_MK1": VW.SKODA_KAMIQ_MK1,
   "SKODA SUPERB 3RD GEN": VW.SKODA_SUPERB_MK3,
+
+  "BMW E82 2009": BMW.BMW_E82,
+  "BMW E90 2008": BMW.BMW_E90,
 
   "mock": MOCK.MOCK,
 }
