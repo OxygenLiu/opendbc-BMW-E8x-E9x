@@ -47,22 +47,22 @@ BO_ 170 AccPedal: 8 DME
  SG_ EngineSpeed : 32|16@1+ (0.25,0) [0|8000] "rpm" XXX
  SG_ Checksum_170 : 0|8@1- (1,0) [0|65535] "" XXX
 
-BO_ 404 CruiseControl: 4 SZL
- SG_ plus1mph_request : 16|1@0+ (1,0) [0|1] "" XXX
- SG_ minus1mph_request : 18|1@0+ (1,0) [0|1] "" XXX
- SG_ Cancel_request_up_stalk : 23|1@0+ (1,0) [0|1] "" XXX
- SG_ Cancel_request_up_or_down_stalk : 20|1@0+ (1,0) [0|1] "" XXX
- SG_ Resume_request : 22|1@0+ (1,0) [0|1] "" XXX
- SG_ setMe_0xFC : 31|8@0+ (1,0) [0|255] "" XXX
- SG_ plus5mph_request : 17|1@0+ (1,0) [0|0] "" Vector__XXX
- SG_ minus5mph_request : 19|1@0+ (1,0) [0|0] "" Vector__XXX
+BO_ 404 CruiseControlStalk: 4 SZL
+ SG_ Checksum_0x194 : 7|8@0+ (1,0) [0|255] "" XXX
+ SG_ Counter_0x194 : 11|4@0+ (1,0) [0|15] "" XXX
  SG_ requests_0xF : 15|4@0+ (1,0) [0|15] "" XXX
- SG_ Counter_404 : 11|4@0+ (1,0) [0|15] "" XXX
- SG_ Checksum_404 : 7|8@0+ (1,0) [0|15] "" XXX
+ SG_ plus1 : 16|1@0+ (1,0) [0|1] "" XXX
+ SG_ plus5 : 17|1@0+ (1,0) [0|1] "" Vector__XXX
+ SG_ minus1 : 18|1@0+ (1,0) [0|1] "" XXX
+ SG_ minus5 : 19|1@0+ (1,0) [0|1] "" Vector__XXX
+ SG_ cancel : 20|1@0+ (1,0) [0|1] "" XXX
+ SG_ resume : 22|1@0+ (1,0) [0|1] "" XXX
+ SG_ cancel_lever_up : 23|1@0+ (1,0) [0|1] "" XXX
+ SG_ setMe_0xFC : 31|8@0+ (1,0) [255|255] "" XXX
 
 BO_ 512 CruiseControlStatus: 8 DME
  SG_ CruiseControlInactiveFlag : 12|1@0+ (1,0) [0|1] "" XXX
- SG_ CruiseCoontrolActiveFlag : 13|1@0+ (1,0) [0|1] "" XXX
+ SG_ CruiseControlActiveFlag : 13|1@0+ (1,0) [0|1] "" XXX
  SG_ CruiseControlSetpointSpeed : 7|8@0+ (0.25,0) [0|255] "mph" XXX
 
 BO_ 168 EngineAndBrake: 8 DME
